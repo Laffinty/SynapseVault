@@ -1,0 +1,20 @@
+# Rust
+/target/
+Cargo.lock
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 运行时数据
+*.db
+*.key
+*.log
