@@ -35,15 +35,12 @@ impl SecureClipboard {
     /// # 注意
     /// - 此操作会启动一个后台线程，在超时后将剪贴板内容替换为空字符串
     /// - 如果剪贴板在超时前已被用户修改，不会覆盖用户新内容
-    pub fn copy_secure(
-        &self,
-        password: &str,
-        clear_after_secs: u64,
-    ) -> Result<(), ClipboardError> {
-        let mut clipboard = arboard::Clipboard::new()
-            .map_err(|e| ClipboardError::AccessFailed(e.to_string()))?;
+    pub fn copy_secure(&self, password: &str, clear_after_secs: u64) -> Result<(), ClipboardError> {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| ClipboardError::AccessFailed(e.to_string()))?;
 
-        clipboard.set_text(password.to_string())
+        clipboard
+            .set_text(password.to_string())
             .map_err(|e| ClipboardError::AccessFailed(e.to_string()))?;
 
         // 记录当前内容，用于判断剪贴板是否被修改
@@ -70,9 +67,10 @@ impl SecureClipboard {
 
     /// 立即清除剪贴板内容
     pub fn clear(&self) -> Result<(), ClipboardError> {
-        let mut clipboard = arboard::Clipboard::new()
-            .map_err(|e| ClipboardError::AccessFailed(e.to_string()))?;
-        clipboard.set_text("")
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| ClipboardError::AccessFailed(e.to_string()))?;
+        clipboard
+            .set_text("")
             .map_err(|e| ClipboardError::AccessFailed(e.to_string()))?;
         Ok(())
     }

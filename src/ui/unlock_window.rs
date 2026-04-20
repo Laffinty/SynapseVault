@@ -89,10 +89,7 @@ pub fn render_unlock_window(
                     }
                 });
                 if key_file_path.is_empty() {
-                    ui.colored_label(
-                        egui::Color32::GRAY,
-                        "提示: 输入 .key 文件的保存/加载路径",
-                    );
+                    ui.colored_label(egui::Color32::GRAY, "提示: 输入 .key 文件的保存/加载路径");
                 }
 
                 ui.add_space(8.0);
@@ -113,10 +110,7 @@ pub fn render_unlock_window(
                                 .hint_text("输入主密码..."),
                         );
                     }
-                    if ui
-                        .button(if *show_password { "🙈" } else { "👁" })
-                        .clicked()
-                    {
+                    if ui.button(if *show_password { "🙈" } else { "👁" }).clicked() {
                         *show_password = !*show_password;
                     }
                 });
@@ -161,7 +155,10 @@ pub fn render_unlock_window(
                         UnlockWindowMode::Unlock => "解锁",
                     };
                     let btn_size = [140.0, 36.0];
-                    if ui.add_sized(btn_size, egui::Button::new(btn_text)).clicked() {
+                    if ui
+                        .add_sized(btn_size, egui::Button::new(btn_text))
+                        .clicked()
+                    {
                         action = Some(UnlockAction::Submit);
                     }
 

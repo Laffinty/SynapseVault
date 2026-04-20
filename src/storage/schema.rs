@@ -199,11 +199,22 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         init_schema(&conn).unwrap();
 
-        let tables = ["groups", "members", "secrets", "blocks", "audit_index", "sync_state", "local_config"];
+        let tables = [
+            "groups",
+            "members",
+            "secrets",
+            "blocks",
+            "audit_index",
+            "sync_state",
+            "local_config",
+        ];
         for table in &tables {
             let count: i64 = conn
                 .query_row(
-                    &format!("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='{}'", table),
+                    &format!(
+                        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='{}'",
+                        table
+                    ),
                     [],
                     |row| row.get(0),
                 )

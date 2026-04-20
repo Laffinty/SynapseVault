@@ -26,7 +26,11 @@ pub fn render_secret_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui
 
     // 密码列表
     let secrets = if app.secret_search_query.is_empty() {
-        app.secret_metas.values().flatten().cloned().collect::<Vec<_>>()
+        app.secret_metas
+            .values()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>()
     } else {
         // 简单搜索：在所有组的密码中搜索
         let query = app.secret_search_query.to_lowercase();
@@ -36,7 +40,10 @@ pub fn render_secret_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui
             .filter(|meta| {
                 meta.title.to_lowercase().contains(&query)
                     || meta.username.to_lowercase().contains(&query)
-                    || meta.tags.iter().any(|t: &String| t.to_lowercase().contains(&query))
+                    || meta
+                        .tags
+                        .iter()
+                        .any(|t: &String| t.to_lowercase().contains(&query))
                     || meta.environment.to_lowercase().contains(&query)
             })
             .cloned()
@@ -71,10 +78,30 @@ fn render_secret_table(
         .striped(true)
         .resizable(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::initial(180.0).at_least(120.0).clip(true).resizable(true))
-        .column(Column::initial(120.0).at_least(80.0).clip(true).resizable(true))
-        .column(Column::initial(100.0).at_least(60.0).clip(true).resizable(true))
-        .column(Column::initial(120.0).at_least(80.0).clip(true).resizable(true))
+        .column(
+            Column::initial(180.0)
+                .at_least(120.0)
+                .clip(true)
+                .resizable(true),
+        )
+        .column(
+            Column::initial(120.0)
+                .at_least(80.0)
+                .clip(true)
+                .resizable(true),
+        )
+        .column(
+            Column::initial(100.0)
+                .at_least(60.0)
+                .clip(true)
+                .resizable(true),
+        )
+        .column(
+            Column::initial(120.0)
+                .at_least(80.0)
+                .clip(true)
+                .resizable(true),
+        )
         .column(Column::initial(80.0).at_least(60.0).resizable(true))
         .column(Column::initial(120.0).at_least(80.0).resizable(true))
         .header(20.0, |mut header| {

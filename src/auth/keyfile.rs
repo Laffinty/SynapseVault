@@ -76,12 +76,11 @@ pub fn generate_key_file(
     let (signing_key, verifying_key) = generate_keypair();
     let mut private_key_bytes = signing_key.to_bytes();
 
-    let keyfile_key =
-        derive_keyfile_key(&master_key).map_err(|_| KeyFileError::EncryptFailed)?;
+    let keyfile_key = derive_keyfile_key(&master_key).map_err(|_| KeyFileError::EncryptFailed)?;
     let nonce = generate_nonce();
 
-    let encrypted_private_key =
-        encrypt(&private_key_bytes, &keyfile_key, &nonce).map_err(|_| KeyFileError::EncryptFailed)?;
+    let encrypted_private_key = encrypt(&private_key_bytes, &keyfile_key, &nonce)
+        .map_err(|_| KeyFileError::EncryptFailed)?;
 
     let fp = generate_device_fingerprint(&verifying_key);
 
@@ -115,17 +114,15 @@ pub fn reset_password(
     let salt = generate_salt();
     let argon2_params = Argon2Params::default();
 
-    let master_key =
-        crate::crypto::kdf::derive_master_key(new_password, &salt, &argon2_params)
-            .map_err(|_| KeyFileError::EncryptFailed)?;
+    let master_key = crate::crypto::kdf::derive_master_key(new_password, &salt, &argon2_params)
+        .map_err(|_| KeyFileError::EncryptFailed)?;
 
     let mut private_key_bytes = signing_key.to_bytes();
-    let keyfile_key =
-        derive_keyfile_key(&master_key).map_err(|_| KeyFileError::EncryptFailed)?;
+    let keyfile_key = derive_keyfile_key(&master_key).map_err(|_| KeyFileError::EncryptFailed)?;
     let nonce = generate_nonce();
 
-    let encrypted_private_key =
-        encrypt(&private_key_bytes, &keyfile_key, &nonce).map_err(|_| KeyFileError::EncryptFailed)?;
+    let encrypted_private_key = encrypt(&private_key_bytes, &keyfile_key, &nonce)
+        .map_err(|_| KeyFileError::EncryptFailed)?;
 
     // 安全擦除
     let mut master_key_copy = master_key;
@@ -253,8 +250,8 @@ pub fn decode_key_file(data: &[u8]) -> Result<KeyFile, KeyFileError> {
     // Public key
     let mut pubkey_bytes = [0u8; 32];
     pubkey_bytes.copy_from_slice(&data[pos..pos + 32]);
-    let public_key = VerifyingKey::from_bytes(&pubkey_bytes)
-        .map_err(|_| KeyFileError::InvalidFormat)?;
+    let public_key =
+        VerifyingKey::from_bytes(&pubkey_bytes).map_err(|_| KeyFileError::InvalidFormat)?;
     pos += 32;
 
     // Device fingerprint
@@ -285,10 +282,10 @@ pub fn decode_key_file(data: &[u8]) -> Result<KeyFile, KeyFileError> {
 mod tests {
     use super::*;
 
-
     #[test]
     fn test_generate_and_encode_decode() {
-        let (key_file, _signing_key, _master_key) = generate_key_file("my_strong_password").unwrap();
+        let (key_file, _signing_key, _master_key) =
+            generate_key_file("my_strong_password").unwrap();
 
         let encoded = encode_key_file(&key_file).unwrap();
         let decoded = decode_key_file(&encoded).unwrap();
@@ -299,7 +296,10 @@ mod tests {
         assert_eq!(key_file.public_key, decoded.public_key);
         assert_eq!(key_file.device_fingerprint, decoded.device_fingerprint);
         assert_eq!(key_file.argon2_params, decoded.argon2_params);
-        assert_eq!(key_file.encrypted_private_key, decoded.encrypted_private_key);
+        assert_eq!(
+            key_file.encrypted_private_key,
+            decoded.encrypted_private_key
+        );
     }
 
     #[test]
@@ -338,7 +338,10 @@ mod tests {
         // 设备指纹应保持不变
         assert_eq!(key_file.device_fingerprint, new_key_file.device_fingerprint);
         // 加密后的私钥应不同（因为使用了不同的密钥和 nonce）
-        assert_ne!(key_file.encrypted_private_key, new_key_file.encrypted_private_key);
+        assert_ne!(
+            key_file.encrypted_private_key,
+            new_key_file.encrypted_private_key
+        );
     }
 
     #[test]

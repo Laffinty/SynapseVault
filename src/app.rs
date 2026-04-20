@@ -139,7 +139,10 @@ impl SynapseVaultApp {
         }
 
         let result = {
-            let mut guard = self.unlock_result.lock().expect("unlock result mutex poisoned");
+            let mut guard = self
+                .unlock_result
+                .lock()
+                .expect("unlock result mutex poisoned");
             guard.take()
         };
 
@@ -177,9 +180,13 @@ impl SynapseVaultApp {
             }
             UnlockAction::BrowseKeyFile => {
                 let picked = if self.is_first_setup {
-                    rfd::FileDialog::new().add_filter("Key File", &["key"]).save_file()
+                    rfd::FileDialog::new()
+                        .add_filter("Key File", &["key"])
+                        .save_file()
                 } else {
-                    rfd::FileDialog::new().add_filter("Key File", &["key"]).pick_file()
+                    rfd::FileDialog::new()
+                        .add_filter("Key File", &["key"])
+                        .pick_file()
                 };
                 if let Some(path) = picked {
                     self.key_file_path = path.to_string_lossy().to_string();
@@ -386,21 +393,18 @@ impl eframe::App for SynapseVaultApp {
                         ui.separator();
                         ui.label("在线: 0/0");
 
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                let theme_icon = match self.theme {
-                                    ThemeMode::Dark => "☀️",
-                                    ThemeMode::Light => "🌙",
-                                };
-                                if ui.button(theme_icon).clicked() {
-                                    self.toggle_theme(&ctx);
-                                }
-                                if ui.button("⚙️").clicked() {
-                                    self.current_panel = Panel::Settings;
-                                }
-                            },
-                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let theme_icon = match self.theme {
+                                ThemeMode::Dark => "☀️",
+                                ThemeMode::Light => "🌙",
+                            };
+                            if ui.button(theme_icon).clicked() {
+                                self.toggle_theme(&ctx);
+                            }
+                            if ui.button("⚙️").clicked() {
+                                self.current_panel = Panel::Settings;
+                            }
+                        });
                     });
                 });
 
@@ -489,10 +493,7 @@ impl eframe::App for SynapseVaultApp {
                     match dialog.as_str() {
                         "forget_password" => {
                             ui.label("忘记密码将重置本地身份，需要重新申请加入组。");
-                            ui.colored_label(
-                                egui::Color32::RED,
-                                "警告：本地数据将无法恢复！",
-                            );
+                            ui.colored_label(egui::Color32::RED, "警告：本地数据将无法恢复！");
                             ui.add_space(10.0);
                             if ui.button("重置密钥文件").clicked() {
                                 let _ = std::fs::remove_file(&self.key_file_path);
@@ -514,13 +515,17 @@ impl eframe::App for SynapseVaultApp {
                                         let store = SecretStore::new(conn);
                                         match store.get_secret(&secret_id.to_string()) {
                                             Ok(entry) => {
-                                                match store.decrypt_password(&secret_id.to_string(), &session.master_key) {
+                                                match store.decrypt_password(
+                                                    &secret_id.to_string(),
+                                                    &session.master_key,
+                                                ) {
                                                     Ok(password) => {
-                                                        self.view_secret_dialog = Some(ViewSecretDialog::new(
-                                                            secret_id.to_string(),
-                                                            &entry,
-                                                            password,
-                                                        ));
+                                                        self.view_secret_dialog =
+                                                            Some(ViewSecretDialog::new(
+                                                                secret_id.to_string(),
+                                                                &entry,
+                                                                password,
+                                                            ));
                                                     }
                                                     Err(e) => {
                                                         ui.label(format!("解密失败: {}", e));
@@ -545,7 +550,10 @@ impl eframe::App for SynapseVaultApp {
                                 if let Some(ref conn) = self.db_conn {
                                     if let Some(ref session) = self.session {
                                         let store = SecretStore::new(conn);
-                                        match store.decrypt_password(&secret_id.to_string(), &session.master_key) {
+                                        match store.decrypt_password(
+                                            &secret_id.to_string(),
+                                            &session.master_key,
+                                        ) {
                                             Ok(password) => {
                                                 let _ = self.clipboard.copy_secure(&password, 30);
                                                 ui.label("密码已复制到剪贴板（30秒后自动清除）。");

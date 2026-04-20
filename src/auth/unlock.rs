@@ -98,17 +98,19 @@ pub fn unlock_key_file(
     }
 
     // Argon2id 派生主密钥
-    let master_key =
-        derive_master_key(master_password, &key_file.salt, &key_file.argon2_params)
-            .map_err(|_| UnlockError::KdfError)?;
+    let master_key = derive_master_key(master_password, &key_file.salt, &key_file.argon2_params)
+        .map_err(|_| UnlockError::KdfError)?;
 
     // HKDF 派生密钥文件加密密钥
     let keyfile_key = derive_keyfile_key(&master_key).map_err(|_| UnlockError::KdfError)?;
 
     // 解密私钥
-    let decrypted_private_key =
-        decrypt(&key_file.encrypted_private_key, &keyfile_key, &key_file.nonce)
-            .map_err(|_| UnlockError::DecryptionFailed)?;
+    let decrypted_private_key = decrypt(
+        &key_file.encrypted_private_key,
+        &keyfile_key,
+        &key_file.nonce,
+    )
+    .map_err(|_| UnlockError::DecryptionFailed)?;
 
     if decrypted_private_key.len() != 32 {
         return Err(UnlockError::DecryptionFailed);
@@ -173,7 +175,10 @@ mod tests {
         let encoded = crate::auth::keyfile::encode_key_file(&key_file).unwrap();
 
         let result = unlock_key_file(&encoded, "wrong_password", &fp);
-        assert!(matches!(result, Err(UnlockError::DecryptionFailed | UnlockError::PublicKeyMismatch)));
+        assert!(matches!(
+            result,
+            Err(UnlockError::DecryptionFailed | UnlockError::PublicKeyMismatch)
+        ));
     }
 
     #[test]

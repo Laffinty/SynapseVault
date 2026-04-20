@@ -10,7 +10,9 @@ use uuid::Uuid;
 use crate::crypto::kdf::derive_secret_seed;
 use crate::crypto::key_derivation::derive_per_secret_key;
 use crate::crypto::symmetric::{decrypt, encrypt, generate_nonce};
-use crate::secret::entry::{GroupId, MemberId, SecretEntry, SecretEntryError, SecretId, SecretMeta};
+use crate::secret::entry::{
+    GroupId, MemberId, SecretEntry, SecretEntryError, SecretId, SecretMeta,
+};
 
 /// 密码存储
 pub struct SecretStore<'a> {
@@ -54,8 +56,8 @@ impl<'a> SecretStore<'a> {
         let now = Utc::now();
 
         // 派生 per-secret 密钥并加密密码
-        let secret_seed = derive_secret_seed(master_key)
-            .map_err(|_| SecretEntryError::EncryptionFailed)?;
+        let secret_seed =
+            derive_secret_seed(master_key).map_err(|_| SecretEntryError::EncryptionFailed)?;
         let per_secret_key = derive_per_secret_key(&secret_seed, &secret_id)
             .map_err(|_| SecretEntryError::EncryptionFailed)?;
         let nonce = generate_nonce();
@@ -149,7 +151,10 @@ impl<'a> SecretStore<'a> {
     }
 
     /// 获取密码条目元信息列表
-    pub fn list_secrets(&self, group_id: Option<&GroupId>) -> Result<Vec<SecretMeta>, SecretEntryError> {
+    pub fn list_secrets(
+        &self,
+        group_id: Option<&GroupId>,
+    ) -> Result<Vec<SecretMeta>, SecretEntryError> {
         let sql = if group_id.is_some() {
             "SELECT secret_id, title, username, environment, tags, updated_at, expires_at
              FROM secrets WHERE group_id = ?1 ORDER BY updated_at DESC"
@@ -158,7 +163,9 @@ impl<'a> SecretStore<'a> {
              FROM secrets ORDER BY updated_at DESC"
         };
 
-        let mut stmt = self.conn.prepare(sql)
+        let mut stmt = self
+            .conn
+            .prepare(sql)
             .map_err(|e| SecretEntryError::InvalidData(e.to_string()))?;
 
         let rows: Result<Vec<SecretMeta>, SecretEntryError> = if let Some(gid) = group_id {
@@ -174,12 +181,15 @@ impl<'a> SecretStore<'a> {
                     updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
                         .map(|dt| dt.with_timezone(&Utc))
                         .unwrap_or_else(|_| Utc::now()),
-                    expires_at: row.get::<_, Option<String>>(6)?.and_then(|s|
-                        DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok()
-                    ),
+                    expires_at: row.get::<_, Option<String>>(6)?.and_then(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .ok()
+                    }),
                 })
-            })?.collect::<Result<Vec<_>, rusqlite::Error>>()
-                .map_err(SecretEntryError::from)
+            })?
+            .collect::<Result<Vec<_>, rusqlite::Error>>()
+            .map_err(SecretEntryError::from)
         } else {
             stmt.query_map([], |row| {
                 let tags_json: String = row.get(4)?;
@@ -193,12 +203,15 @@ impl<'a> SecretStore<'a> {
                     updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
                         .map(|dt| dt.with_timezone(&Utc))
                         .unwrap_or_else(|_| Utc::now()),
-                    expires_at: row.get::<_, Option<String>>(6)?.and_then(|s|
-                        DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok()
-                    ),
+                    expires_at: row.get::<_, Option<String>>(6)?.and_then(|s| {
+                        DateTime::parse_from_rfc3339(&s)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .ok()
+                    }),
                 })
-            })?.collect::<Result<Vec<_>, rusqlite::Error>>()
-                .map_err(SecretEntryError::from)
+            })?
+            .collect::<Result<Vec<_>, rusqlite::Error>>()
+            .map_err(SecretEntryError::from)
         };
 
         rows
@@ -241,8 +254,8 @@ impl<'a> SecretStore<'a> {
         }
 
         if let Some(password) = new_password {
-            let secret_seed = derive_secret_seed(master_key)
-                .map_err(|_| SecretEntryError::EncryptionFailed)?;
+            let secret_seed =
+                derive_secret_seed(master_key).map_err(|_| SecretEntryError::EncryptionFailed)?;
             let per_secret_key = derive_per_secret_key(&secret_seed, secret_id)
                 .map_err(|_| SecretEntryError::EncryptionFailed)?;
             let nonce = generate_nonce();
@@ -257,36 +270,38 @@ impl<'a> SecretStore<'a> {
         let tags_json = serde_json::to_string(&entry.tags)
             .map_err(|e| SecretEntryError::InvalidData(e.to_string()))?;
 
-        self.conn.execute(
-            "UPDATE secrets SET
+        self.conn
+            .execute(
+                "UPDATE secrets SET
                 title = ?1, username = ?2, encrypted_password = ?3, nonce = ?4,
                 environment = ?5, tags = ?6, description = ?7, updated_at = ?8,
                 version = ?9, expires_at = ?10
              WHERE secret_id = ?11",
-            params![
-                &entry.title,
-                &entry.username,
-                &entry.encrypted_password,
-                &entry.nonce[..],
-                &entry.environment,
-                tags_json,
-                &entry.description,
-                entry.updated_at.to_rfc3339(),
-                entry.version as i64,
-                entry.expires_at.map(|t| t.to_rfc3339()),
-                secret_id,
-            ],
-        ).map_err(|e| SecretEntryError::InvalidData(e.to_string()))?;
+                params![
+                    &entry.title,
+                    &entry.username,
+                    &entry.encrypted_password,
+                    &entry.nonce[..],
+                    &entry.environment,
+                    tags_json,
+                    &entry.description,
+                    entry.updated_at.to_rfc3339(),
+                    entry.version as i64,
+                    entry.expires_at.map(|t| t.to_rfc3339()),
+                    secret_id,
+                ],
+            )
+            .map_err(|e| SecretEntryError::InvalidData(e.to_string()))?;
 
         Ok(entry)
     }
 
     /// 删除密码条目
     pub fn delete_secret(&self, secret_id: &SecretId) -> Result<(), SecretEntryError> {
-        let rows = self.conn.execute(
-            "DELETE FROM secrets WHERE secret_id = ?1",
-            [secret_id],
-        ).map_err(|e| SecretEntryError::InvalidData(e.to_string()))?;
+        let rows = self
+            .conn
+            .execute("DELETE FROM secrets WHERE secret_id = ?1", [secret_id])
+            .map_err(|e| SecretEntryError::InvalidData(e.to_string()))?;
 
         if rows == 0 {
             return Err(SecretEntryError::NotFound(secret_id.clone()));
@@ -301,16 +316,15 @@ impl<'a> SecretStore<'a> {
         master_key: &[u8; 32],
     ) -> Result<String, SecretEntryError> {
         let entry = self.get_secret(secret_id)?;
-        let secret_seed = derive_secret_seed(master_key)
-            .map_err(|_| SecretEntryError::DecryptionFailed)?;
+        let secret_seed =
+            derive_secret_seed(master_key).map_err(|_| SecretEntryError::DecryptionFailed)?;
         let per_secret_key = derive_per_secret_key(&secret_seed, secret_id)
             .map_err(|_| SecretEntryError::DecryptionFailed)?;
 
         let plaintext = decrypt(&entry.encrypted_password, &per_secret_key, &entry.nonce)
             .map_err(|_| SecretEntryError::DecryptionFailed)?;
 
-        String::from_utf8(plaintext)
-            .map_err(|_| SecretEntryError::DecryptionFailed)
+        String::from_utf8(plaintext).map_err(|_| SecretEntryError::DecryptionFailed)
     }
 
     /// 搜索密码条目
@@ -323,14 +337,20 @@ impl<'a> SecretStore<'a> {
         let all = self.list_secrets(group_id)?;
         let query_lower = query.to_lowercase();
 
-        let filtered: Vec<SecretMeta> = all.into_iter()
+        let filtered: Vec<SecretMeta> = all
+            .into_iter()
             .filter(|meta| {
                 let matches_query = query.is_empty()
                     || meta.title.to_lowercase().contains(&query_lower)
                     || meta.username.to_lowercase().contains(&query_lower)
-                    || meta.tags.iter().any(|t| t.to_lowercase().contains(&query_lower));
+                    || meta
+                        .tags
+                        .iter()
+                        .any(|t| t.to_lowercase().contains(&query_lower));
 
-                let matches_env = environment.map(|env| meta.environment == env).unwrap_or(true);
+                let matches_env = environment
+                    .map(|env| meta.environment == env)
+                    .unwrap_or(true);
 
                 matches_query && matches_env
             })
@@ -364,18 +384,20 @@ mod tests {
         let store = SecretStore::new(&conn);
         let master_key = [0x42u8; 32];
 
-        let entry = store.create_secret(
-            &"group-1".to_string(),
-            "核心交换机",
-            "admin",
-            "secret_password_123",
-            "生产环境",
-            vec!["ssh".to_string(), "network".to_string()],
-            "核心网络设备",
-            None,
-            &"member-1".to_string(),
-            &master_key,
-        ).unwrap();
+        let entry = store
+            .create_secret(
+                &"group-1".to_string(),
+                "核心交换机",
+                "admin",
+                "secret_password_123",
+                "生产环境",
+                vec!["ssh".to_string(), "network".to_string()],
+                "核心网络设备",
+                None,
+                &"member-1".to_string(),
+                &master_key,
+            )
+            .unwrap();
 
         let fetched = store.get_secret(&entry.secret_id).unwrap();
         assert_eq!(fetched.title, "核心交换机");
@@ -391,20 +413,24 @@ mod tests {
         let master_key = [0x42u8; 32];
         let original_password = "my_super_secret_password!@#";
 
-        let entry = store.create_secret(
-            &"group-1".to_string(),
-            "Test",
-            "user",
-            original_password,
-            "dev",
-            vec![],
-            "",
-            None,
-            &"member-1".to_string(),
-            &master_key,
-        ).unwrap();
+        let entry = store
+            .create_secret(
+                &"group-1".to_string(),
+                "Test",
+                "user",
+                original_password,
+                "dev",
+                vec![],
+                "",
+                None,
+                &"member-1".to_string(),
+                &master_key,
+            )
+            .unwrap();
 
-        let decrypted = store.decrypt_password(&entry.secret_id, &master_key).unwrap();
+        let decrypted = store
+            .decrypt_password(&entry.secret_id, &master_key)
+            .unwrap();
         assert_eq!(decrypted, original_password);
     }
 
@@ -414,31 +440,35 @@ mod tests {
         let store = SecretStore::new(&conn);
         let master_key = [0x42u8; 32];
 
-        store.create_secret(
-            &"group-1".to_string(),
-            "Secret A",
-            "user1",
-            "pass1",
-            "prod",
-            vec![],
-            "",
-            None,
-            &"member-1".to_string(),
-            &master_key,
-        ).unwrap();
+        store
+            .create_secret(
+                &"group-1".to_string(),
+                "Secret A",
+                "user1",
+                "pass1",
+                "prod",
+                vec![],
+                "",
+                None,
+                &"member-1".to_string(),
+                &master_key,
+            )
+            .unwrap();
 
-        store.create_secret(
-            &"group-1".to_string(),
-            "Secret B",
-            "user2",
-            "pass2",
-            "dev",
-            vec![],
-            "",
-            None,
-            &"member-1".to_string(),
-            &master_key,
-        ).unwrap();
+        store
+            .create_secret(
+                &"group-1".to_string(),
+                "Secret B",
+                "user2",
+                "pass2",
+                "dev",
+                vec![],
+                "",
+                None,
+                &"member-1".to_string(),
+                &master_key,
+            )
+            .unwrap();
 
         let list = store.list_secrets(Some(&"group-1".to_string())).unwrap();
         assert_eq!(list.len(), 2);
@@ -450,30 +480,34 @@ mod tests {
         let store = SecretStore::new(&conn);
         let master_key = [0x42u8; 32];
 
-        let entry = store.create_secret(
-            &"group-1".to_string(),
-            "Old Title",
-            "old_user",
-            "old_pass",
-            "dev",
-            vec!["tag1".to_string()],
-            "old desc",
-            None,
-            &"member-1".to_string(),
-            &master_key,
-        ).unwrap();
+        let entry = store
+            .create_secret(
+                &"group-1".to_string(),
+                "Old Title",
+                "old_user",
+                "old_pass",
+                "dev",
+                vec!["tag1".to_string()],
+                "old desc",
+                None,
+                &"member-1".to_string(),
+                &master_key,
+            )
+            .unwrap();
 
-        let updated = store.update_secret(
-            &entry.secret_id,
-            Some("new_pass"),
-            Some("New Title"),
-            Some("new_user"),
-            Some("prod"),
-            Some(vec!["tag2".to_string()]),
-            Some("new desc"),
-            None,
-            &master_key,
-        ).unwrap();
+        let updated = store
+            .update_secret(
+                &entry.secret_id,
+                Some("new_pass"),
+                Some("New Title"),
+                Some("new_user"),
+                Some("prod"),
+                Some(vec!["tag2".to_string()]),
+                Some("new desc"),
+                None,
+                &master_key,
+            )
+            .unwrap();
 
         assert_eq!(updated.title, "New Title");
         assert_eq!(updated.username, "new_user");
@@ -482,7 +516,9 @@ mod tests {
         assert_eq!(updated.version, 2);
 
         // 验证新密码可以解密
-        let decrypted = store.decrypt_password(&entry.secret_id, &master_key).unwrap();
+        let decrypted = store
+            .decrypt_password(&entry.secret_id, &master_key)
+            .unwrap();
         assert_eq!(decrypted, "new_pass");
     }
 
@@ -492,18 +528,20 @@ mod tests {
         let store = SecretStore::new(&conn);
         let master_key = [0x42u8; 32];
 
-        let entry = store.create_secret(
-            &"group-1".to_string(),
-            "ToDelete",
-            "user",
-            "pass",
-            "dev",
-            vec![],
-            "",
-            None,
-            &"member-1".to_string(),
-            &master_key,
-        ).unwrap();
+        let entry = store
+            .create_secret(
+                &"group-1".to_string(),
+                "ToDelete",
+                "user",
+                "pass",
+                "dev",
+                vec![],
+                "",
+                None,
+                &"member-1".to_string(),
+                &master_key,
+            )
+            .unwrap();
 
         store.delete_secret(&entry.secret_id).unwrap();
         assert!(store.get_secret(&entry.secret_id).is_err());
@@ -515,37 +553,45 @@ mod tests {
         let store = SecretStore::new(&conn);
         let master_key = [0x42u8; 32];
 
-        store.create_secret(
-            &"group-1".to_string(),
-            "Production DB",
-            "dbadmin",
-            "pass1",
-            "prod",
-            vec!["database".to_string()],
-            "",
-            None,
-            &"member-1".to_string(),
-            &master_key,
-        ).unwrap();
+        store
+            .create_secret(
+                &"group-1".to_string(),
+                "Production DB",
+                "dbadmin",
+                "pass1",
+                "prod",
+                vec!["database".to_string()],
+                "",
+                None,
+                &"member-1".to_string(),
+                &master_key,
+            )
+            .unwrap();
 
-        store.create_secret(
-            &"group-1".to_string(),
-            "Dev Server",
-            "devuser",
-            "pass2",
-            "dev",
-            vec!["server".to_string()],
-            "",
-            None,
-            &"member-1".to_string(),
-            &master_key,
-        ).unwrap();
+        store
+            .create_secret(
+                &"group-1".to_string(),
+                "Dev Server",
+                "devuser",
+                "pass2",
+                "dev",
+                vec!["server".to_string()],
+                "",
+                None,
+                &"member-1".to_string(),
+                &master_key,
+            )
+            .unwrap();
 
-        let results = store.search_secrets(Some(&"group-1".to_string()), "Production", None).unwrap();
+        let results = store
+            .search_secrets(Some(&"group-1".to_string()), "Production", None)
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Production DB");
 
-        let results = store.search_secrets(Some(&"group-1".to_string()), "", Some("dev")).unwrap();
+        let results = store
+            .search_secrets(Some(&"group-1".to_string()), "", Some("dev"))
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].title, "Dev Server");
     }
@@ -557,18 +603,20 @@ mod tests {
         let master_key = [0x42u8; 32];
         let wrong_key = [0x43u8; 32];
 
-        let entry = store.create_secret(
-            &"group-1".to_string(),
-            "Test",
-            "user",
-            "secret",
-            "dev",
-            vec![],
-            "",
-            None,
-            &"member-1".to_string(),
-            &master_key,
-        ).unwrap();
+        let entry = store
+            .create_secret(
+                &"group-1".to_string(),
+                "Test",
+                "user",
+                "secret",
+                "dev",
+                vec![],
+                "",
+                None,
+                &"member-1".to_string(),
+                &master_key,
+            )
+            .unwrap();
 
         let result = store.decrypt_password(&entry.secret_id, &wrong_key);
         assert!(result.is_err());

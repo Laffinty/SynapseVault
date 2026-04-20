@@ -47,7 +47,8 @@ pub fn open_database(path: &Path, master_key: &[u8; 32]) -> Result<Connection, S
     conn.pragma_update(None, "key", format!("x'{}'", db_key_hex))?;
 
     // 验证密钥是否正确（尝试读取）
-    let _check: i64 = conn.query_row("SELECT count(*) FROM sqlite_master;", [], |row| row.get(0))?;
+    let _check: i64 =
+        conn.query_row("SELECT count(*) FROM sqlite_master;", [], |row| row.get(0))?;
 
     // 初始化 Schema
     init_schema(&conn)?;
@@ -97,11 +98,8 @@ mod tests {
         // SQLCipher 在错误密钥下可能成功打开但后续读取失败
         // 具体行为取决于 SQLCipher 版本
         if let Ok(conn) = result {
-            let check: Result<i64, _> = conn.query_row(
-                "SELECT count(*) FROM sqlite_master",
-                [],
-                |row| row.get(0),
-            );
+            let check: Result<i64, _> =
+                conn.query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0));
             assert!(check.is_err(), "Wrong key should fail to read");
         }
     }

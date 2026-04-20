@@ -9,10 +9,10 @@
 //! - 解密验证
 //! - 错误密钥解密失败
 
+use rusqlite::Connection;
 use synapse_vault::secret::entry::SecretEntryError;
 use synapse_vault::secret::store::SecretStore;
 use synapse_vault::storage::schema::init_schema;
-use rusqlite::Connection;
 
 fn setup_test_db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
@@ -33,18 +33,20 @@ fn test_secret_full_crud_flow() {
     let master_key = [0x42u8; 32];
 
     // 1. 创建密码
-    let entry = store.create_secret(
-        &"group-1".to_string(),
-        "核心交换机-SSH",
-        "admin",
-        "SecurePass123!",
-        "生产环境",
-        vec!["ssh".to_string(), "network".to_string()],
-        "核心网络设备SSH密码",
-        None,
-        &"member-1".to_string(),
-        &master_key,
-    ).unwrap();
+    let entry = store
+        .create_secret(
+            &"group-1".to_string(),
+            "核心交换机-SSH",
+            "admin",
+            "SecurePass123!",
+            "生产环境",
+            vec!["ssh".to_string(), "network".to_string()],
+            "核心网络设备SSH密码",
+            None,
+            &"member-1".to_string(),
+            &master_key,
+        )
+        .unwrap();
 
     assert_eq!(entry.title, "核心交换机-SSH");
     assert_eq!(entry.username, "admin");
@@ -58,7 +60,9 @@ fn test_secret_full_crud_flow() {
     assert_eq!(fetched.title, entry.title);
 
     // 3. 解密验证
-    let plaintext = store.decrypt_password(&entry.secret_id, &master_key).unwrap();
+    let plaintext = store
+        .decrypt_password(&entry.secret_id, &master_key)
+        .unwrap();
     assert_eq!(plaintext, "SecurePass123!");
 
     // 4. 列表查询
@@ -67,17 +71,19 @@ fn test_secret_full_crud_flow() {
     assert_eq!(list[0].title, "核心交换机-SSH");
 
     // 5. 更新密码
-    let updated = store.update_secret(
-        &entry.secret_id,
-        Some("NewPass456!"),
-        Some("核心交换机-SSH-已更新"),
-        Some("root"),
-        Some("测试环境"),
-        Some(vec!["telnet".to_string()]),
-        Some("更新后的描述"),
-        None,
-        &master_key,
-    ).unwrap();
+    let updated = store
+        .update_secret(
+            &entry.secret_id,
+            Some("NewPass456!"),
+            Some("核心交换机-SSH-已更新"),
+            Some("root"),
+            Some("测试环境"),
+            Some(vec!["telnet".to_string()]),
+            Some("更新后的描述"),
+            None,
+            &master_key,
+        )
+        .unwrap();
 
     assert_eq!(updated.title, "核心交换机-SSH-已更新");
     assert_eq!(updated.username, "root");
@@ -86,14 +92,20 @@ fn test_secret_full_crud_flow() {
     assert_eq!(updated.version, 2);
 
     // 验证更新后的密码可解密
-    let new_plaintext = store.decrypt_password(&entry.secret_id, &master_key).unwrap();
+    let new_plaintext = store
+        .decrypt_password(&entry.secret_id, &master_key)
+        .unwrap();
     assert_eq!(new_plaintext, "NewPass456!");
 
     // 6. 搜索
-    let results = store.search_secrets(Some(&"group-1".to_string()), "核心交换机", None).unwrap();
+    let results = store
+        .search_secrets(Some(&"group-1".to_string()), "核心交换机", None)
+        .unwrap();
     assert_eq!(results.len(), 1);
 
-    let results = store.search_secrets(Some(&"group-1".to_string()), "不存在", None).unwrap();
+    let results = store
+        .search_secrets(Some(&"group-1".to_string()), "不存在", None)
+        .unwrap();
     assert!(results.is_empty());
 
     // 7. 删除密码
@@ -115,18 +127,20 @@ fn test_decrypt_with_wrong_master_key_fails() {
     let master_key = [0xABu8; 32];
     let wrong_key = [0xBAu8; 32];
 
-    let entry = store.create_secret(
-        &"group-1".to_string(),
-        "Secret",
-        "user",
-        "password123",
-        "dev",
-        vec![],
-        "",
-        None,
-        &"member-1".to_string(),
-        &master_key,
-    ).unwrap();
+    let entry = store
+        .create_secret(
+            &"group-1".to_string(),
+            "Secret",
+            "user",
+            "password123",
+            "dev",
+            vec![],
+            "",
+            None,
+            &"member-1".to_string(),
+            &master_key,
+        )
+        .unwrap();
 
     let result = store.decrypt_password(&entry.secret_id, &wrong_key);
     assert!(result.is_err());
@@ -138,33 +152,39 @@ fn test_search_by_environment() {
     let store = SecretStore::new(&conn);
     let master_key = [0x42u8; 32];
 
-    store.create_secret(
-        &"group-1".to_string(),
-        "Prod DB",
-        "dbadmin",
-        "pass1",
-        "production",
-        vec!["database".to_string()],
-        "",
-        None,
-        &"member-1".to_string(),
-        &master_key,
-    ).unwrap();
+    store
+        .create_secret(
+            &"group-1".to_string(),
+            "Prod DB",
+            "dbadmin",
+            "pass1",
+            "production",
+            vec!["database".to_string()],
+            "",
+            None,
+            &"member-1".to_string(),
+            &master_key,
+        )
+        .unwrap();
 
-    store.create_secret(
-        &"group-1".to_string(),
-        "Dev Server",
-        "devuser",
-        "pass2",
-        "development",
-        vec!["server".to_string()],
-        "",
-        None,
-        &"member-1".to_string(),
-        &master_key,
-    ).unwrap();
+    store
+        .create_secret(
+            &"group-1".to_string(),
+            "Dev Server",
+            "devuser",
+            "pass2",
+            "development",
+            vec!["server".to_string()],
+            "",
+            None,
+            &"member-1".to_string(),
+            &master_key,
+        )
+        .unwrap();
 
-    let results = store.search_secrets(Some(&"group-1".to_string()), "", Some("production")).unwrap();
+    let results = store
+        .search_secrets(Some(&"group-1".to_string()), "", Some("production"))
+        .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].title, "Prod DB");
 }
@@ -176,22 +196,27 @@ fn test_secret_expiration() {
     let master_key = [0x42u8; 32];
     let expires = chrono::Utc::now() + chrono::Duration::days(30);
 
-    let entry = store.create_secret(
-        &"group-1".to_string(),
-        "Temp Password",
-        "temp",
-        "temppass",
-        "staging",
-        vec![],
-        "",
-        Some(expires),
-        &"member-1".to_string(),
-        &master_key,
-    ).unwrap();
+    let entry = store
+        .create_secret(
+            &"group-1".to_string(),
+            "Temp Password",
+            "temp",
+            "temppass",
+            "staging",
+            vec![],
+            "",
+            Some(expires),
+            &"member-1".to_string(),
+            &master_key,
+        )
+        .unwrap();
 
     assert!(entry.expires_at.is_some());
     let fetched = store.get_secret(&entry.secret_id).unwrap();
-    assert_eq!(fetched.expires_at.map(|dt| dt.timestamp()), Some(expires.timestamp()));
+    assert_eq!(
+        fetched.expires_at.map(|dt| dt.timestamp()),
+        Some(expires.timestamp())
+    );
 }
 
 #[test]
@@ -201,18 +226,20 @@ fn test_multiple_secrets_list_ordering() {
     let master_key = [0x42u8; 32];
 
     for i in 0..5 {
-        store.create_secret(
-            &"group-1".to_string(),
-            &format!("Secret {}", i),
-            &format!("user{}", i),
-            &format!("pass{}", i),
-            "prod",
-            vec![],
-            "",
-            None,
-            &"member-1".to_string(),
-            &master_key,
-        ).unwrap();
+        store
+            .create_secret(
+                &"group-1".to_string(),
+                &format!("Secret {}", i),
+                &format!("user{}", i),
+                &format!("pass{}", i),
+                "prod",
+                vec![],
+                "",
+                None,
+                &"member-1".to_string(),
+                &master_key,
+            )
+            .unwrap();
     }
 
     let list = store.list_secrets(Some(&"group-1".to_string())).unwrap();

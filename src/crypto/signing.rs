@@ -2,7 +2,7 @@
 //!
 //! 提供 ed25519 密钥对生成、消息签名、签名验证的便捷接口。
 
-use ed25519_dalek::{Signer, Verifier, SigningKey, VerifyingKey, Signature};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
 
 /// 签名相关错误

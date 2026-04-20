@@ -41,8 +41,7 @@ pub fn encrypt(
     key: &[u8; 32],
     nonce: &[u8; 24],
 ) -> Result<Vec<u8>, SymmetricError> {
-    let cipher = XChaCha20Poly1305::new_from_slice(key)
-        .map_err(|_| SymmetricError::InvalidKey)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(key).map_err(|_| SymmetricError::InvalidKey)?;
     let nonce = XNonce::from_slice(nonce);
     cipher
         .encrypt(nonce, plaintext)
@@ -63,8 +62,7 @@ pub fn decrypt(
     key: &[u8; 32],
     nonce: &[u8; 24],
 ) -> Result<Vec<u8>, SymmetricError> {
-    let cipher = XChaCha20Poly1305::new_from_slice(key)
-        .map_err(|_| SymmetricError::InvalidKey)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(key).map_err(|_| SymmetricError::InvalidKey)?;
     let nonce = XNonce::from_slice(nonce);
     cipher
         .decrypt(nonce, ciphertext)

@@ -3,10 +3,10 @@
 //! 验证"生成密钥文件 → 保存 → 读取 → 解锁"的完整路径，
 //! 模拟真实 App 的调用方式（BUG-P1-001 的回归测试）。
 
+use std::io::Write;
 use synapse_vault::auth::device_fingerprint::generate_device_fingerprint;
 use synapse_vault::auth::keyfile::{decode_key_file, encode_key_file, generate_key_file};
 use synapse_vault::auth::unlock::unlock_key_file;
-use std::io::Write;
 
 #[test]
 fn test_full_unlock_flow_from_disk() {

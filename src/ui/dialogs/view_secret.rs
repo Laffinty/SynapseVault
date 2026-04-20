@@ -95,7 +95,14 @@ pub fn render_view_secret_dialog(
                             .desired_width(280.0),
                     );
 
-                    if ui.button(if dialog.show_password { "🙈 隐藏" } else { "👁 显示" }).clicked() {
+                    if ui
+                        .button(if dialog.show_password {
+                            "🙈 隐藏"
+                        } else {
+                            "👁 显示"
+                        })
+                        .clicked()
+                    {
                         dialog.show_password = !dialog.show_password;
                     }
                 });
