@@ -1,8 +1,15 @@
 use crate::auth::device_fingerprint::generate_device_fingerprint;
 use crate::auth::keyfile::{encode_key_file, generate_key_file};
 use crate::auth::unlock::{unlock_key_file, UnlockedSession};
+use crate::secret::clipboard::SecureClipboard;
+use crate::secret::entry::SecretMeta;
+use crate::secret::store::SecretStore;
+use crate::storage::database::open_database;
+use crate::ui::dialogs::view_secret::{render_view_secret_dialog, ViewSecretDialog};
+use crate::ui::secret_panel::render_secret_panel;
 use crate::ui::unlock_window::{render_unlock_window, UnlockAction, UnlockWindowMode};
 use egui::{Context, Visuals};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -54,8 +61,20 @@ pub struct SynapseVaultApp {
     // 搜索与过滤
     pub secret_search_query: String,
 
+    // 密码数据
+    pub secret_metas: HashMap<String, Vec<SecretMeta>>,
+
+    // 剪贴板管理器
+    pub clipboard: SecureClipboard,
+
     // 弹窗状态
     pub show_dialog: Option<String>,
+
+    // 数据库连接
+    pub db_conn: Option<rusqlite::Connection>,
+
+    // 查看密码弹窗状态
+    pub view_secret_dialog: Option<ViewSecretDialog>,
 }
 
 impl Default for SynapseVaultApp {
@@ -82,7 +101,11 @@ impl Default for SynapseVaultApp {
             unlock_result: Arc::new(Mutex::new(None)),
             session: None,
             secret_search_query: String::new(),
+            secret_metas: HashMap::new(),
+            clipboard: SecureClipboard::new(),
             show_dialog: None,
+            db_conn: None,
+            view_secret_dialog: None,
         }
     }
 }
@@ -115,8 +138,12 @@ impl SynapseVaultApp {
             return;
         }
 
-        let mut guard = self.unlock_result.lock().expect("unlock result mutex poisoned");
-        if let Some(result) = guard.take() {
+        let result = {
+            let mut guard = self.unlock_result.lock().expect("unlock result mutex poisoned");
+            guard.take()
+        };
+
+        if let Some(result) = result {
             match result {
                 Ok(session) => {
                     self.session = Some(session);
@@ -125,6 +152,7 @@ impl SynapseVaultApp {
                     self.unlock_error = None;
                     self.password_input.clear();
                     self.confirm_password.clear();
+                    self.open_database_and_load_secrets();
                 }
                 Err(err) => {
                     self.unlock_state = UnlockState::Locked;
@@ -274,6 +302,34 @@ impl SynapseVaultApp {
         });
     }
 
+    /// 打开数据库并加载密码列表
+    fn open_database_and_load_secrets(&mut self) {
+        let Some(session) = &self.session else { return };
+
+        let db_path = dirs::data_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("synapsevault")
+            .join("vault.db");
+
+        match open_database(&db_path, &session.master_key) {
+            Ok(conn) => {
+                let store = SecretStore::new(&conn);
+                match store.list_secrets(None) {
+                    Ok(metas) => {
+                        self.secret_metas.insert("default".to_string(), metas);
+                    }
+                    Err(e) => {
+                        tracing::warn!("加载密码列表失败: {}", e);
+                    }
+                }
+                self.db_conn = Some(conn);
+            }
+            Err(e) => {
+                tracing::warn!("打开数据库失败: {}", e);
+            }
+        }
+    }
+
     /// 锁定应用
     fn lock_app(&mut self) {
         self.unlock_state = UnlockState::Locked;
@@ -281,6 +337,9 @@ impl SynapseVaultApp {
         self.password_input.clear();
         self.confirm_password.clear();
         self.unlock_error = None;
+        self.db_conn = None;
+        self.secret_metas.clear();
+        self.view_secret_dialog = None;
     }
 }
 
@@ -401,13 +460,7 @@ impl eframe::App for SynapseVaultApp {
                         });
                     }
                     Panel::SecretVault => {
-                        ui.heading("🔑 密码库");
-                        ui.horizontal(|ui| {
-                            ui.label("搜索:");
-                            ui.text_edit_singleline(&mut self.secret_search_query);
-                        });
-                        ui.add_space(10.0);
-                        ui.label("密码列表将在此显示。");
+                        render_secret_panel(self, &ctx, ui);
                     }
                     Panel::RbacManagement => {
                         ui.heading("🛡️ 权限管理");
@@ -454,6 +507,61 @@ impl eframe::App for SynapseVaultApp {
                         "discover_groups" => {
                             ui.label("组发现功能将在后续阶段实现。");
                         }
+                        dialog_str if dialog_str.starts_with("view_secret:") => {
+                            if let Some(secret_id) = dialog_str.strip_prefix("view_secret:") {
+                                if let Some(ref conn) = self.db_conn {
+                                    if let Some(ref session) = self.session {
+                                        let store = SecretStore::new(conn);
+                                        match store.get_secret(&secret_id.to_string()) {
+                                            Ok(entry) => {
+                                                match store.decrypt_password(&secret_id.to_string(), &session.master_key) {
+                                                    Ok(password) => {
+                                                        self.view_secret_dialog = Some(ViewSecretDialog::new(
+                                                            secret_id.to_string(),
+                                                            &entry,
+                                                            password,
+                                                        ));
+                                                    }
+                                                    Err(e) => {
+                                                        ui.label(format!("解密失败: {}", e));
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                ui.label(format!("获取密码条目失败: {}", e));
+                                            }
+                                        }
+                                    } else {
+                                        ui.label("会话未建立，无法查看密码。");
+                                    }
+                                } else {
+                                    ui.label("数据库未连接，无法查看密码。");
+                                }
+                            }
+                            close = true;
+                        }
+                        dialog_str if dialog_str.starts_with("copy_secret:") => {
+                            if let Some(secret_id) = dialog_str.strip_prefix("copy_secret:") {
+                                if let Some(ref conn) = self.db_conn {
+                                    if let Some(ref session) = self.session {
+                                        let store = SecretStore::new(conn);
+                                        match store.decrypt_password(&secret_id.to_string(), &session.master_key) {
+                                            Ok(password) => {
+                                                let _ = self.clipboard.copy_secure(&password, 30);
+                                                ui.label("密码已复制到剪贴板（30秒后自动清除）。");
+                                            }
+                                            Err(e) => {
+                                                ui.label(format!("解密失败: {}", e));
+                                            }
+                                        }
+                                    } else {
+                                        ui.label("会话未建立，无法复制密码。");
+                                    }
+                                } else {
+                                    ui.label("数据库未连接，无法复制密码。");
+                                }
+                            }
+                        }
                         _ => {
                             ui.label(format!("未知弹窗: {}", dialog));
                         }
@@ -468,7 +576,18 @@ impl eframe::App for SynapseVaultApp {
             }
         }
 
-        // 4. 请求持续重绘
+        // 4. 渲染查看密码弹窗
+        if let Some(mut dialog) = self.view_secret_dialog.take() {
+            let clipboard = &self.clipboard;
+            let mut on_copy = |text: &str| {
+                let _ = clipboard.copy_secure(text, 30);
+            };
+            if !render_view_secret_dialog(&ctx, &mut dialog, &mut on_copy) {
+                self.view_secret_dialog = Some(dialog);
+            }
+        }
+
+        // 5. 请求持续重绘
         ctx.request_repaint();
     }
 }
