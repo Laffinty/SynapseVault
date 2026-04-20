@@ -8,7 +8,10 @@
       "Bash(cargo metadata *)",
       "Bash(python -c \"import sys,json; m=json.load\\(sys.stdin\\); pkgs=[p for p in m['packages'] if p['name']=='rusqlite']; print\\([f for f in pkgs[0]['features'].keys\\(\\)] if pkgs else 'not found'\\)\")",
       "Read(//c/Strawberry/perl/bin/**)",
-      "Bash(perl -v)"
+      "Bash(perl -v)",
+      "Bash(xargs cat *)",
+      "Bash(cargo doc *)",
+      "Bash(cargo build *)"
     ]
   }
 }

@@ -60,8 +60,9 @@ pub struct SynapseVaultApp {
 
 impl Default for SynapseVaultApp {
     fn default() -> Self {
-        let default_key_path = std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        let default_key_path = dirs::data_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("synapsevault")
             .join("synapsevault.key")
             .to_string_lossy()
             .to_string();
@@ -120,6 +121,7 @@ impl SynapseVaultApp {
                 Ok(session) => {
                     self.session = Some(session);
                     self.unlock_state = UnlockState::Unlocked;
+                    self.is_first_setup = false;
                     self.unlock_error = None;
                     self.password_input.clear();
                     self.confirm_password.clear();
@@ -145,10 +147,20 @@ impl SynapseVaultApp {
             UnlockAction::ForgotPassword => {
                 self.show_dialog = Some("forget_password".to_string());
             }
+            UnlockAction::BrowseKeyFile => {
+                let picked = if self.is_first_setup {
+                    rfd::FileDialog::new().add_filter("Key File", &["key"]).save_file()
+                } else {
+                    rfd::FileDialog::new().add_filter("Key File", &["key"]).pick_file()
+                };
+                if let Some(path) = picked {
+                    self.key_file_path = path.to_string_lossy().to_string();
+                }
+            }
         }
     }
 
-    /// 首次设置：生成密钥文件并解锁
+    /// 首次设置：在独立线程中生成密钥文件并解锁
     fn handle_first_setup(&mut self) {
         self.unlock_error = None;
 
@@ -170,55 +182,51 @@ impl SynapseVaultApp {
             return;
         }
 
-        // 生成密钥文件
-        let (_sk, vk) = crate::crypto::signing::generate_keypair();
-        let fp = generate_device_fingerprint(&vk);
-        let (key_file, signing_key) = match generate_key_file(&self.password_input, &fp) {
-            Ok(v) => v,
-            Err(e) => {
-                self.unlock_error = Some(format!("生成密钥文件失败: {}", e));
+        let password = self.password_input.clone();
+        let key_file_path = self.key_file_path.clone();
+        let result_arc = Arc::clone(&self.unlock_result);
+
+        self.unlock_state = UnlockState::Unlocking;
+
+        std::thread::spawn(move || {
+            // 生成密钥文件（内部包含 Argon2id）
+            let (key_file, signing_key, master_key) = match generate_key_file(&password) {
+                Ok(v) => v,
+                Err(e) => {
+                    let mut guard = result_arc.lock().expect("unlock result mutex poisoned");
+                    *guard = Some(Err(format!("生成密钥文件失败: {}", e)));
+                    return;
+                }
+            };
+
+            // 编码并保存
+            let encoded = match encode_key_file(&key_file) {
+                Ok(v) => v,
+                Err(e) => {
+                    let mut guard = result_arc.lock().expect("unlock result mutex poisoned");
+                    *guard = Some(Err(format!("编码密钥文件失败: {}", e)));
+                    return;
+                }
+            };
+
+            if let Err(e) = std::fs::write(&key_file_path, &encoded) {
+                let mut guard = result_arc.lock().expect("unlock result mutex poisoned");
+                *guard = Some(Err(format!("保存密钥文件失败: {}", e)));
                 return;
             }
-        };
 
-        // 编码并保存
-        let encoded = match encode_key_file(&key_file) {
-            Ok(v) => v,
-            Err(e) => {
-                self.unlock_error = Some(format!("编码密钥文件失败: {}", e));
-                return;
-            }
-        };
+            let fp = generate_device_fingerprint(&key_file.public_key);
+            let session = UnlockedSession {
+                private_key: signing_key,
+                public_key: key_file.public_key,
+                master_key,
+                device_fingerprint: fp.combined,
+                unlocked_at: chrono::Utc::now(),
+            };
 
-        if let Err(e) = std::fs::write(&self.key_file_path, &encoded) {
-            self.unlock_error = Some(format!("保存密钥文件失败: {}", e));
-            return;
-        }
-
-        // 直接进入已解锁状态
-        let master_key = match crate::crypto::kdf::derive_master_key(
-            &self.password_input,
-            &key_file.salt,
-            &key_file.argon2_params,
-        ) {
-            Ok(v) => v,
-            Err(e) => {
-                self.unlock_error = Some(format!("密钥派生失败: {}", e));
-                return;
-            }
-        };
-
-        self.session = Some(UnlockedSession {
-            private_key: signing_key,
-            master_key,
-            device_fingerprint: fp.combined,
-            unlocked_at: chrono::Utc::now(),
+            let mut guard = result_arc.lock().expect("unlock result mutex poisoned");
+            *guard = Some(Ok(session));
         });
-        self.unlock_state = UnlockState::Unlocked;
-        self.is_first_setup = false;
-        self.password_input.clear();
-        self.confirm_password.clear();
-        self.unlock_error = None;
     }
 
     /// 正常解锁：在线程中执行 Argon2id

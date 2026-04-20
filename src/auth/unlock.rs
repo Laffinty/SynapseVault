@@ -15,6 +15,8 @@ use zeroize::Zeroize;
 pub struct UnlockedSession {
     /// ed25519 签名私钥（临时加载，退出即丢弃）
     pub private_key: SigningKey,
+    /// ed25519 公钥（节点身份标识）
+    pub public_key: ed25519_dalek::VerifyingKey,
     /// 由 Argon2id 派生的 32 字节主密钥
     pub master_key: [u8; 32],
     /// 设备指纹组合字符串
@@ -43,7 +45,7 @@ impl std::fmt::Debug for UnlockedSession {
         f.debug_struct("UnlockedSession")
             .field("device_fingerprint", &self.device_fingerprint)
             .field("unlocked_at", &self.unlocked_at)
-            .field("public_key", &self.private_key.verifying_key())
+            .field("public_key", &self.public_key)
             .finish_non_exhaustive()
     }
 }
@@ -132,6 +134,7 @@ pub fn unlock_key_file(
 
     Ok(UnlockedSession {
         private_key,
+        public_key: key_file.public_key,
         master_key,
         device_fingerprint: expected_fingerprint.combined.clone(),
         unlocked_at: Utc::now(),
@@ -152,22 +155,21 @@ mod tests {
 
     #[test]
     fn test_unlock_success() {
-        let (_sk, vk) = generate_keypair();
-        let fp = generate_device_fingerprint(&vk);
-        let (key_file, _signing_key) = generate_key_file("correct_password", &fp).unwrap();
+        let (key_file, _signing_key, _) = generate_key_file("correct_password").unwrap();
+        let fp = generate_device_fingerprint(&key_file.public_key);
         let encoded = crate::auth::keyfile::encode_key_file(&key_file).unwrap();
 
         let session = unlock_key_file(&encoded, "correct_password", &fp).unwrap();
         assert_eq!(session.device_fingerprint, fp.combined);
+        assert_eq!(session.public_key, key_file.public_key);
         // 验证主密钥非全零
         assert_ne!(session.master_key, [0u8; 32]);
     }
 
     #[test]
     fn test_unlock_wrong_password_fails() {
-        let (_sk, vk) = generate_keypair();
-        let fp = generate_device_fingerprint(&vk);
-        let (key_file, _signing_key) = generate_key_file("correct_password", &fp).unwrap();
+        let (key_file, _signing_key, _) = generate_key_file("correct_password").unwrap();
+        let fp = generate_device_fingerprint(&key_file.public_key);
         let encoded = crate::auth::keyfile::encode_key_file(&key_file).unwrap();
 
         let result = unlock_key_file(&encoded, "wrong_password", &fp);
@@ -176,9 +178,8 @@ mod tests {
 
     #[test]
     fn test_unlock_wrong_fingerprint_fails() {
-        let (_sk, vk) = generate_keypair();
-        let fp = generate_device_fingerprint(&vk);
-        let (key_file, _signing_key) = generate_key_file("password", &fp).unwrap();
+        let (key_file, _signing_key, _) = generate_key_file("password").unwrap();
+        let _fp = generate_device_fingerprint(&key_file.public_key);
         let encoded = crate::auth::keyfile::encode_key_file(&key_file).unwrap();
 
         let wrong_fp = DeviceFingerprint {
@@ -193,16 +194,16 @@ mod tests {
 
     #[test]
     fn test_unlock_invalid_keyfile() {
-        let fp = generate_device_fingerprint(&generate_keypair().1);
+        let (_, vk) = generate_keypair();
+        let fp = generate_device_fingerprint(&vk);
         let result = unlock_key_file(b"invalid_data", "password", &fp);
         assert!(matches!(result, Err(UnlockError::KeyFile(_))));
     }
 
     #[test]
     fn test_session_zeroize_on_drop() {
-        let (_sk, vk) = generate_keypair();
-        let fp = generate_device_fingerprint(&vk);
-        let (key_file, _signing_key) = generate_key_file("password", &fp).unwrap();
+        let (key_file, _signing_key, _) = generate_key_file("password").unwrap();
+        let fp = generate_device_fingerprint(&key_file.public_key);
         let encoded = crate::auth::keyfile::encode_key_file(&key_file).unwrap();
 
         let session = unlock_key_file(&encoded, "password", &fp).unwrap();

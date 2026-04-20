@@ -15,7 +15,7 @@
 //! 校验和: 32 bytes (SHA-256 of all above)
 //! ```
 
-use crate::auth::device_fingerprint::DeviceFingerprint;
+use crate::auth::device_fingerprint::generate_device_fingerprint;
 use crate::crypto::kdf::{derive_keyfile_key, generate_salt, Argon2Params};
 use crate::crypto::signing::generate_keypair;
 use crate::crypto::symmetric::{encrypt, generate_nonce};
@@ -61,14 +61,12 @@ pub enum KeyFileError {
 ///
 /// # 参数
 /// - `master_password`: 用户设置的主密码
-/// - `device_fingerprint`: 当前设备的指纹字符串
 ///
 /// # 返回
-/// - `(KeyFile, SigningKey)`: 密钥文件结构和对应的签名私钥
+/// - `(KeyFile, SigningKey, [u8; 32])`: 密钥文件结构、签名私钥、主密钥
 pub fn generate_key_file(
     master_password: &str,
-    device_fingerprint: &DeviceFingerprint,
-) -> Result<(KeyFile, SigningKey), KeyFileError> {
+) -> Result<(KeyFile, SigningKey, [u8; 32]), KeyFileError> {
     let salt = generate_salt();
     let argon2_params = Argon2Params::default();
 
@@ -76,7 +74,7 @@ pub fn generate_key_file(
         .map_err(|_| KeyFileError::EncryptFailed)?;
 
     let (signing_key, verifying_key) = generate_keypair();
-    let private_key_bytes = signing_key.to_bytes();
+    let mut private_key_bytes = signing_key.to_bytes();
 
     let keyfile_key =
         derive_keyfile_key(&master_key).map_err(|_| KeyFileError::EncryptFailed)?;
@@ -85,13 +83,12 @@ pub fn generate_key_file(
     let encrypted_private_key =
         encrypt(&private_key_bytes, &keyfile_key, &nonce).map_err(|_| KeyFileError::EncryptFailed)?;
 
+    let fp = generate_device_fingerprint(&verifying_key);
+
     // 安全擦除中间密钥和私钥副本
-    let mut master_key_copy = master_key;
     let mut keyfile_key_copy = keyfile_key;
-    let mut private_key_copy = private_key_bytes;
-    master_key_copy.zeroize();
     keyfile_key_copy.zeroize();
-    private_key_copy.zeroize();
+    private_key_bytes.zeroize();
 
     let key_file = KeyFile {
         version: VERSION,
@@ -99,11 +96,11 @@ pub fn generate_key_file(
         encrypted_private_key,
         nonce,
         public_key: verifying_key,
-        device_fingerprint: device_fingerprint.combined.clone(),
+        device_fingerprint: fp.combined,
         argon2_params,
     };
 
-    Ok((key_file, signing_key))
+    Ok((key_file, signing_key, master_key))
 }
 
 /// 重置密码（重新加密私钥）
@@ -122,7 +119,7 @@ pub fn reset_password(
         crate::crypto::kdf::derive_master_key(new_password, &salt, &argon2_params)
             .map_err(|_| KeyFileError::EncryptFailed)?;
 
-    let private_key_bytes = signing_key.to_bytes();
+    let mut private_key_bytes = signing_key.to_bytes();
     let keyfile_key =
         derive_keyfile_key(&master_key).map_err(|_| KeyFileError::EncryptFailed)?;
     let nonce = generate_nonce();
@@ -135,6 +132,7 @@ pub fn reset_password(
     let mut keyfile_key_copy = keyfile_key;
     master_key_copy.zeroize();
     keyfile_key_copy.zeroize();
+    private_key_bytes.zeroize();
 
     Ok(KeyFile {
         version: VERSION,
@@ -286,14 +284,11 @@ pub fn decode_key_file(data: &[u8]) -> Result<KeyFile, KeyFileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::device_fingerprint::generate_device_fingerprint;
-    use crate::crypto::signing::generate_keypair;
+
 
     #[test]
     fn test_generate_and_encode_decode() {
-        let (_sk, vk) = generate_keypair();
-        let fp = generate_device_fingerprint(&vk);
-        let (key_file, _signing_key) = generate_key_file("my_strong_password", &fp).unwrap();
+        let (key_file, _signing_key, _master_key) = generate_key_file("my_strong_password").unwrap();
 
         let encoded = encode_key_file(&key_file).unwrap();
         let decoded = decode_key_file(&encoded).unwrap();
@@ -319,9 +314,7 @@ mod tests {
 
     #[test]
     fn test_decode_checksum_mismatch() {
-        let (_sk, vk) = generate_keypair();
-        let fp = generate_device_fingerprint(&vk);
-        let (key_file, _) = generate_key_file("password", &fp).unwrap();
+        let (key_file, _, _) = generate_key_file("password").unwrap();
         let mut encoded = encode_key_file(&key_file).unwrap();
         // 篡改最后一个字节（位于校验和区域内）
         let last = encoded.len() - 1;
@@ -334,9 +327,7 @@ mod tests {
 
     #[test]
     fn test_reset_password_changes_salt() {
-        let (_sk, vk) = generate_keypair();
-        let fp = generate_device_fingerprint(&vk);
-        let (key_file, signing_key) = generate_key_file("old_password", &fp).unwrap();
+        let (key_file, signing_key, _) = generate_key_file("old_password").unwrap();
 
         let new_key_file = reset_password(&key_file, &signing_key, "new_password").unwrap();
 
@@ -351,11 +342,9 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_password_fails_argon2() {
-        let (_sk, vk) = generate_keypair();
-        let fp = generate_device_fingerprint(&vk);
+    fn test_empty_password_allowed_by_argon2() {
         // Argon2 允许空密码，但生成密钥文件本身不会失败
-        let result = generate_key_file("", &fp);
+        let result = generate_key_file("");
         assert!(result.is_ok());
     }
 }

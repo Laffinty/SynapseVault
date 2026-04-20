@@ -20,6 +20,8 @@ pub enum UnlockAction {
     Submit,
     /// 用户点击了忘记密码
     ForgotPassword,
+    /// 用户点击了浏览按钮（选择密钥文件路径）
+    BrowseKeyFile,
 }
 
 /// 渲染解锁窗口
@@ -82,6 +84,9 @@ pub fn render_unlock_window(
                         egui::TextEdit::singleline(key_file_path)
                             .hint_text("输入 .key 文件路径..."),
                     );
+                    if ui.button("浏览...").clicked() {
+                        action = Some(UnlockAction::BrowseKeyFile);
+                    }
                 });
                 if key_file_path.is_empty() {
                     ui.colored_label(
