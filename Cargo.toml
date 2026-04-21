@@ -24,7 +24,7 @@ libp2p = { version = "0.56", features = [
 # Crypto
 argon2 = "0.5"
 chacha20poly1305 = { version = "0.10", features = ["std"] }
-ed25519-dalek = { version = "2.2", features = ["zeroize", "rand_core"] }
+ed25519-dalek = { version = "2.2", features = ["zeroize", "rand_core", "serde"] }
 hkdf = "0.12"
 sha2 = "0.10"
 rand = "0.8"
@@ -63,6 +63,9 @@ thiserror = "2.0"
 
 # Directories
 dirs = "6.0"
+
+# Hex encoding
+hex = "0.4"
 
 # UUID
 uuid = { version = "1.0", features = ["v4", "serde"] }

@@ -1,11 +1,16 @@
 use crate::auth::device_fingerprint::generate_device_fingerprint;
 use crate::auth::keyfile::{encode_key_file, generate_key_file};
 use crate::auth::unlock::{unlock_key_file, UnlockedSession};
+use crate::group::manager::JoinRequest;
+use crate::p2p::discovery::DiscoveryState;
 use crate::secret::clipboard::SecureClipboard;
 use crate::secret::entry::SecretMeta;
 use crate::secret::store::SecretStore;
 use crate::storage::database::open_database;
+use crate::ui::dialogs::create_group::{render_create_group_dialog, CreateGroupDialog, CreateGroupResult};
+use crate::ui::dialogs::join_group::{render_join_group_dialog, JoinGroupDialog, JoinGroupResult};
 use crate::ui::dialogs::view_secret::{render_view_secret_dialog, ViewSecretDialog};
+use crate::ui::group_panel::render_group_panel;
 use crate::ui::secret_panel::render_secret_panel;
 use crate::ui::unlock_window::{render_unlock_window, UnlockAction, UnlockWindowMode};
 use egui::{Context, Visuals};
@@ -75,6 +80,20 @@ pub struct SynapseVaultApp {
 
     // 查看密码弹窗状态
     pub view_secret_dialog: Option<ViewSecretDialog>,
+
+    // ===== Phase 3: 组管理状态 =====
+    /// 当前已加入的组
+    pub current_group: Option<crate::group::manager::Group>,
+    /// 群组签名密钥（仅 Admin 持有）
+    pub group_signing_key: Option<crate::group::group_key::GroupSigningKey>,
+    /// P2P 发现状态
+    pub discovery_state: DiscoveryState,
+    /// 待处理的加入请求（已发送但未收到响应）
+    pub pending_join_requests: Vec<JoinRequest>,
+
+    // 组管理弹窗状态
+    pub create_group_dialog: Option<CreateGroupDialog>,
+    pub join_group_dialog: Option<JoinGroupDialog>,
 }
 
 impl Default for SynapseVaultApp {
@@ -106,6 +125,12 @@ impl Default for SynapseVaultApp {
             show_dialog: None,
             db_conn: None,
             view_secret_dialog: None,
+            current_group: None,
+            group_signing_key: None,
+            discovery_state: DiscoveryState::new(),
+            pending_join_requests: Vec::new(),
+            create_group_dialog: None,
+            join_group_dialog: None,
         }
     }
 }
@@ -347,6 +372,12 @@ impl SynapseVaultApp {
         self.db_conn = None;
         self.secret_metas.clear();
         self.view_secret_dialog = None;
+        self.current_group = None;
+        self.group_signing_key = None;
+        self.discovery_state = DiscoveryState::new();
+        self.pending_join_requests.clear();
+        self.create_group_dialog = None;
+        self.join_group_dialog = None;
     }
 }
 
@@ -450,18 +481,7 @@ impl eframe::App for SynapseVaultApp {
                 // 中央面板
                 egui::CentralPanel::default().show_inside(ui, |ui| match self.current_panel {
                     Panel::GroupManagement => {
-                        ui.heading("📁 组管理");
-                        ui.label("此面板用于创建组、发现组和管理成员。");
-                        ui.add_space(20.0);
-                        ui.group(|ui| {
-                            ui.label("操作:");
-                            if ui.button("➕ 创建新组").clicked() {
-                                self.show_dialog = Some("create_group".to_string());
-                            }
-                            if ui.button("🔍 发现组").clicked() {
-                                self.show_dialog = Some("discover_groups".to_string());
-                            }
-                        });
+                        render_group_panel(self, &ctx, ui);
                     }
                     Panel::SecretVault => {
                         render_secret_panel(self, &ctx, ui);
@@ -502,11 +522,11 @@ impl eframe::App for SynapseVaultApp {
                                 close = true;
                             }
                         }
-                        "create_group" => {
-                            ui.label("创建新组功能将在后续阶段实现。");
+                        "create_group_placeholder" => {
+                            ui.label("请使用组管理面板中的「创建新组」按钮。");
                         }
-                        "discover_groups" => {
-                            ui.label("组发现功能将在后续阶段实现。");
+                        "discover_groups_placeholder" => {
+                            ui.label("请使用组管理面板中的「发现组」按钮。");
                         }
                         dialog_str if dialog_str.starts_with("view_secret:") => {
                             if let Some(secret_id) = dialog_str.strip_prefix("view_secret:") {
@@ -595,7 +615,42 @@ impl eframe::App for SynapseVaultApp {
             }
         }
 
-        // 5. 请求持续重绘
+        // 5. 渲染创建组弹窗
+        if let Some(mut dialog) = self.create_group_dialog.take() {
+            if let Some(ref session) = self.session {
+                match render_create_group_dialog(&ctx, &mut dialog, session) {
+                    Some(CreateGroupResult::Created(group, gsk)) => {
+                        self.current_group = Some(group);
+                        self.group_signing_key = Some(gsk);
+                    }
+                    Some(CreateGroupResult::Cancelled) => {}
+                    None => {
+                        self.create_group_dialog = Some(dialog);
+                    }
+                }
+            } else {
+                // 无会话时直接丢弃弹窗
+            }
+        }
+
+        // 6. 渲染加入组弹窗
+        if let Some(mut dialog) = self.join_group_dialog.take() {
+            if let Some(ref session) = self.session {
+                match render_join_group_dialog(&ctx, &mut dialog, &self.discovery_state, session) {
+                    Some(JoinGroupResult::Requested(req)) => {
+                        self.pending_join_requests.push(req);
+                    }
+                    Some(JoinGroupResult::Cancelled) => {}
+                    None => {
+                        self.join_group_dialog = Some(dialog);
+                    }
+                }
+            } else {
+                // 无会话时直接丢弃弹窗
+            }
+        }
+
+        // 7. 请求持续重绘
         ctx.request_repaint();
     }
 }
