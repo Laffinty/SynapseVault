@@ -1746,7 +1746,7 @@ pub enum ActiveScheme {
 
 **交付物**：可创建组、发现组、加入组的 P2P 应用
 
-### Phase 4：CRDT 同步 + RBAC（2-3 周）
+### Phase 4：CRDT 同步 + RBAC（2-3 周）+ 中文字体
 
 **目标**：密码 P2P 同步 + 权限管理
 
@@ -1756,6 +1756,7 @@ pub enum ActiveScheme {
 - [ ] 实现 `rbac/policy.rs`：策略引擎
 - [ ] 实现 `ui/rbac_panel.rs`：权限面板
 - [ ] 实现 `ui/dialogs/approve_member.rs`：审批弹窗
+- [ ] 字体采用内嵌的方式使用font/wqy.ttf
 - [ ] 集成测试：密码同步、冲突解决、权限校验
 
 **交付物**：可同步密码的 P2P 应用，RBAC 权限生效

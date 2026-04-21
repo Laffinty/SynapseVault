@@ -94,6 +94,28 @@ pub fn render_group_panel(app: &mut SynapseVaultApp, _ctx: &Context, ui: &mut Ui
         });
 
         ui.add_space(12.0);
+
+        // Admin 可打开审批弹窗
+        let is_admin = app.is_current_user_admin();
+
+        if is_admin {
+            let pending_count = group
+                .member_map
+                .values()
+                .filter(|m| m.status == crate::group::member::MemberStatus::PendingApproval)
+                .count();
+            let btn_text = if pending_count > 0 {
+                format!("⏳ 审批加入请求 ({})", pending_count)
+            } else {
+                "⏳ 审批加入请求".to_string()
+            };
+            if ui.button(btn_text).clicked() {
+                app.approve_member_dialog =
+                    Some(crate::ui::dialogs::approve_member::ApproveMemberDialog::new());
+            }
+            ui.add_space(8.0);
+        }
+
         if ui.button("🚪 离开当前组").clicked() {
             app.current_group = None;
             app.group_signing_key = None;

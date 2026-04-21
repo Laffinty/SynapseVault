@@ -3,14 +3,19 @@ use crate::auth::keyfile::{encode_key_file, generate_key_file};
 use crate::auth::unlock::{unlock_key_file, UnlockedSession};
 use crate::group::manager::JoinRequest;
 use crate::p2p::discovery::DiscoveryState;
+use crate::rbac::role::Role;
 use crate::secret::clipboard::SecureClipboard;
 use crate::secret::entry::SecretMeta;
 use crate::secret::store::SecretStore;
 use crate::storage::database::open_database;
+use crate::ui::dialogs::approve_member::{
+    render_approve_member_dialog, ApproveMemberDialog, ApproveMemberResult,
+};
 use crate::ui::dialogs::create_group::{render_create_group_dialog, CreateGroupDialog, CreateGroupResult};
 use crate::ui::dialogs::join_group::{render_join_group_dialog, JoinGroupDialog, JoinGroupResult};
 use crate::ui::dialogs::view_secret::{render_view_secret_dialog, ViewSecretDialog};
 use crate::ui::group_panel::render_group_panel;
+use crate::ui::rbac_panel::render_rbac_panel;
 use crate::ui::secret_panel::render_secret_panel;
 use crate::ui::unlock_window::{render_unlock_window, UnlockAction, UnlockWindowMode};
 use egui::{Context, Visuals};
@@ -94,6 +99,15 @@ pub struct SynapseVaultApp {
     // 组管理弹窗状态
     pub create_group_dialog: Option<CreateGroupDialog>,
     pub join_group_dialog: Option<JoinGroupDialog>,
+
+    // ===== Phase 4: RBAC 审批弹窗状态 =====
+    pub approve_member_dialog: Option<ApproveMemberDialog>,
+    /// 收到的待审批加入请求（P2P 事件会推入此处）
+    pub received_join_requests: Vec<JoinRequest>,
+    /// 去重后的待审批请求缓存（避免每帧重算）
+    pub pending_requests_cache: Vec<JoinRequest>,
+    /// 待确认的角色变更操作（目标成员 ID, 新角色）
+    pub pending_role_change: Option<(String, Role)>,
 }
 
 impl Default for SynapseVaultApp {
@@ -131,6 +145,10 @@ impl Default for SynapseVaultApp {
             pending_join_requests: Vec::new(),
             create_group_dialog: None,
             join_group_dialog: None,
+            approve_member_dialog: None,
+            received_join_requests: Vec::new(),
+            pending_requests_cache: Vec::new(),
+            pending_role_change: None,
         }
     }
 }
@@ -362,6 +380,56 @@ impl SynapseVaultApp {
         }
     }
 
+    /// 判断当前用户是否为 Admin
+    pub fn is_current_user_admin(&self) -> bool {
+        let Some(ref session) = self.session else { return false };
+        let Some(ref group) = self.current_group else { return false };
+        let my_id = hex::encode(session.public_key.as_bytes());
+        group
+            .member_map
+            .get(&my_id)
+            .map(|m| m.role == crate::rbac::role::Role::Admin && m.is_active())
+            .unwrap_or(false)
+    }
+
+    /// 刷新待审批请求缓存（去重）
+    fn refresh_pending_requests(&mut self) {
+        let Some(ref group) = self.current_group else {
+            self.pending_requests_cache.clear();
+            return;
+        };
+
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        let mut result = Vec::new();
+
+        // 优先使用外部收到的请求
+        for req in &self.received_join_requests {
+            let id = hex::encode(req.requester_public_key.as_bytes());
+            if seen.insert(id.clone()) {
+                result.push(req.clone());
+            }
+        }
+
+        // 补充 group.member_map 中的 PendingApproval 成员
+        for member in group.member_map.values() {
+            if member.status == crate::group::member::MemberStatus::PendingApproval {
+                let id = member.member_id.clone();
+                if seen.insert(id.clone()) {
+                    result.push(crate::group::manager::JoinRequest {
+                        group_id: group.group_id.clone(),
+                        requester_public_key: member.public_key,
+                        device_fingerprint: member.device_fingerprint.clone(),
+                        timestamp: member.joined_at,
+                        signature: ed25519_dalek::Signature::from_bytes(&[0u8; 64]),
+                    });
+                }
+            }
+        }
+
+        self.pending_requests_cache = result;
+    }
+
     /// 锁定应用
     fn lock_app(&mut self) {
         self.unlock_state = UnlockState::Locked;
@@ -378,6 +446,10 @@ impl SynapseVaultApp {
         self.pending_join_requests.clear();
         self.create_group_dialog = None;
         self.join_group_dialog = None;
+        self.approve_member_dialog = None;
+        self.received_join_requests.clear();
+        self.pending_requests_cache.clear();
+        self.pending_role_change = None;
     }
 }
 
@@ -487,8 +559,7 @@ impl eframe::App for SynapseVaultApp {
                         render_secret_panel(self, &ctx, ui);
                     }
                     Panel::RbacManagement => {
-                        ui.heading("🛡️ 权限管理");
-                        ui.label("角色与权限配置面板。");
+                        render_rbac_panel(self, &ctx, ui);
                     }
                     Panel::AuditLog => {
                         ui.heading("📋 审计日志");
@@ -650,7 +721,48 @@ impl eframe::App for SynapseVaultApp {
             }
         }
 
-        // 7. 请求持续重绘
+        // 7. 渲染成员审批弹窗
+        if let Some(mut dialog) = self.approve_member_dialog.take() {
+            let is_admin = self.is_current_user_admin();
+            if is_admin {
+                // 使用预计算的缓存列表，避免每帧 clone/sort/dedup
+                if self.pending_requests_cache.is_empty() {
+                    self.refresh_pending_requests();
+                }
+                if let Some(ref session) = self.session {
+                    if let Some(ref mut group) = self.current_group {
+                        match render_approve_member_dialog(
+                            &ctx,
+                            &mut dialog,
+                            &self.pending_requests_cache,
+                            group,
+                            &session.private_key,
+                        ) {
+                            Some(ApproveMemberResult::Approved { requester_id }) => {
+                                tracing::info!("已批准成员加入: {}", requester_id);
+                                self.pending_requests_cache.clear();
+                            }
+                            Some(ApproveMemberResult::Rejected { requester_id }) => {
+                                tracing::info!("已拒绝成员加入: {}", requester_id);
+                                self.pending_requests_cache.clear();
+                            }
+                            Some(ApproveMemberResult::Closed) | None => {
+                                self.approve_member_dialog = Some(dialog);
+                            }
+                        }
+                    } else {
+                        self.approve_member_dialog = None;
+                    }
+                } else {
+                    self.approve_member_dialog = None;
+                }
+            } else {
+                // 非 Admin 无法打开审批弹窗
+                self.approve_member_dialog = None;
+            }
+        }
+
+        // 8. 请求持续重绘
         ctx.request_repaint();
     }
 }
