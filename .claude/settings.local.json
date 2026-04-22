@@ -11,7 +11,9 @@
       "Bash(perl -v)",
       "Bash(xargs cat *)",
       "Bash(cargo doc *)",
-      "Bash(cargo build *)"
+      "Bash(cargo build *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }
