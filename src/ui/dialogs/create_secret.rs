@@ -149,6 +149,18 @@ pub fn render_create_secret_dialog(
                         return;
                     }
 
+                    let username = dialog.username.trim();
+                    if username.is_empty() {
+                        dialog.error = Some("用户名不能为空".to_string());
+                        return;
+                    }
+
+                    let password = dialog.password.trim();
+                    if password.is_empty() && !dialog.is_edit {
+                        dialog.error = Some("密码不能为空".to_string());
+                        return;
+                    }
+
                     let expires_at = if dialog.expires_at_str.trim().is_empty() {
                         None
                     } else {

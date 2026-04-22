@@ -56,6 +56,8 @@ pub enum DialogState {
     CreateSecret,
     /// 编辑密码
     EditSecret { secret_id: String },
+    /// 删除密码确认
+    DeleteSecret { secret_id: String },
 }
 
 /// 解锁状态
@@ -437,11 +439,21 @@ impl SynapseVaultApp {
 
     /// 刷新密码列表（从数据库重新加载）
     fn refresh_secret_metas(&mut self) {
-        if let (Some(ref conn), Some(ref group)) = (&self.db_conn, &self.current_group) {
-            let store = SecretStore::new(conn);
+        let Some(ref conn) = self.db_conn else { return };
+        let store = SecretStore::new(conn);
+        if let Some(ref group) = self.current_group {
             match store.list_secrets(Some(&group.group_id)) {
                 Ok(metas) => {
                     self.secret_metas.insert(group.group_id.clone(), metas);
+                }
+                Err(e) => {
+                    tracing::warn!("刷新密码列表失败: {}", e);
+                }
+            }
+        } else {
+            match store.list_secrets(None) {
+                Ok(metas) => {
+                    self.secret_metas.insert("default".to_string(), metas);
                 }
                 Err(e) => {
                     tracing::warn!("刷新密码列表失败: {}", e);
@@ -898,6 +910,36 @@ impl eframe::App for SynapseVaultApp {
                         }
                     }
                     close = true;
+                }
+                DialogState::DeleteSecret { secret_id } => {
+                    egui::Window::new("确认删除")
+                        .collapsible(false)
+                        .resizable(false)
+                        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                        .show(&ctx, |ui| {
+                            ui.label("确定要删除此密码条目吗？此操作不可恢复。");
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("确认删除").clicked() {
+                                    if let Some(ref conn) = self.db_conn {
+                                        let store = SecretStore::new(conn);
+                                        match store.delete_secret(secret_id) {
+                                            Ok(_) => {
+                                                tracing::info!("密码已删除: {}", secret_id);
+                                                self.refresh_secret_metas();
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("删除密码失败: {}", e);
+                                            }
+                                        }
+                                    }
+                                    close = true;
+                                }
+                                if ui.button("取消").clicked() {
+                                    close = true;
+                                }
+                            });
+                        });
                 }
             }
             if close {

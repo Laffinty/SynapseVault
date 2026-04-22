@@ -20,7 +20,11 @@ pub fn render_secret_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui
         if ui.button("清除").clicked() {
             app.secret_search_query.clear();
         }
-        if ui.button("添加密码").clicked() {
+        let has_group = app.current_group.is_some();
+        if !has_group {
+            ui.add_enabled(false, egui::Button::new("添加密码"));
+            ui.colored_label(egui::Color32::YELLOW, "请先创建或加入一个组");
+        } else if ui.button("添加密码").clicked() {
             app.active_dialog = Some(crate::app::DialogState::CreateSecret);
         }
     });
@@ -239,6 +243,9 @@ fn render_secret_table(
                             }
                             if ui.button("编辑").clicked() {
                                 app.active_dialog = Some(crate::app::DialogState::EditSecret { secret_id: secret.secret_id.clone() });
+                            }
+                            if ui.button("删除").clicked() {
+                                app.active_dialog = Some(crate::app::DialogState::DeleteSecret { secret_id: secret.secret_id.clone() });
                             }
                         });
                     });

@@ -76,7 +76,7 @@ pub fn render_unlock_window(
             ui.vertical_centered(|ui| {
                 ui.add_space(16.0);
                 ui.heading("SynapseVault");
-                ui.label("局域网团队密码库");
+                ui.label("局域网共享密码库");
                 ui.add_space(16.0);
 
                 // 密钥文件路径
@@ -97,25 +97,37 @@ pub fn render_unlock_window(
                 ui.add_space(8.0);
 
                 // 密码输入
+                let mut pw_response = None;
                 ui.horizontal(|ui| {
                     ui.label("主密码:  ");
-                    if *show_password {
+                    let resp = if *show_password {
                         ui.add(
                             egui::TextEdit::singleline(password)
                                 .password(false)
                                 .hint_text("输入主密码..."),
-                        );
+                        )
                     } else {
                         ui.add(
                             egui::TextEdit::singleline(password)
                                 .password(true)
                                 .hint_text("输入主密码..."),
-                        );
-                    }
+                        )
+                    };
+                    pw_response = Some(resp);
                     if ui.button(if *show_password { "隐藏" } else { "显示" }).clicked() {
                         *show_password = !*show_password;
                     }
                 });
+
+                // 支持 Enter 键提交
+                if let Some(ref resp) = pw_response {
+                    if resp.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        && !is_unlocking
+                    {
+                        action = Some(UnlockAction::Submit);
+                    }
+                }
 
                 // 首次设置：确认密码
                 if mode == UnlockWindowMode::FirstSetup {
