@@ -4,7 +4,7 @@
 
 use crate::group::manager::{DiscoveredGroup, GroupId};
 use crate::p2p::gossip::parse_gossip_message;
-use crate::p2p::protocol::P2pMessage;
+use crate::p2p::protocol::{AuditEventBrief, BlockBrief, P2pMessage};
 use crate::p2p::transport::SynapseBehaviour;
 use futures::StreamExt;
 use libp2p::gossipsub::Event as GossipsubEvent;
@@ -31,6 +31,12 @@ pub enum P2pEvent {
     SyncRequestReceived { from_peer: String, group_id: GroupId, from_version: u64 },
     /// 收到心跳
     HeartbeatReceived { peer_id: String, group_id: GroupId },
+    /// 收到审计事件批次
+    AuditEventsBatchReceived { from_peer: String, group_id: GroupId, events: Vec<AuditEventBrief> },
+    /// 收到链同步请求
+    ChainSyncRequested { from_peer: String, group_id: GroupId, from_height: u64 },
+    /// 收到链同步响应
+    ChainSyncResponseReceived { from_peer: String, group_id: GroupId, blocks: Vec<BlockBrief> },
     /// 连接已建立
     Connected { peer_id: String },
     /// 连接已关闭
@@ -189,8 +195,27 @@ impl EventLoop {
             }
             P2pMessage::SecretSyncResponse { .. } => {}
             P2pMessage::RoleChange { .. } => {}
-            P2pMessage::AuditEventsBatch { .. } => {}
-            P2pMessage::ChainSyncRequest { .. } => {}
+            P2pMessage::AuditEventsBatch { group_id, events } => {
+                self.events.push_back(P2pEvent::AuditEventsBatchReceived {
+                    from_peer: peer_id.to_string(),
+                    group_id,
+                    events,
+                });
+            }
+            P2pMessage::ChainSyncRequest { group_id, from_height } => {
+                self.events.push_back(P2pEvent::ChainSyncRequested {
+                    from_peer: peer_id.to_string(),
+                    group_id,
+                    from_height,
+                });
+            }
+            P2pMessage::ChainSyncResponse { group_id, blocks } => {
+                self.events.push_back(P2pEvent::ChainSyncResponseReceived {
+                    from_peer: peer_id.to_string(),
+                    group_id,
+                    blocks,
+                });
+            }
             P2pMessage::Heartbeat {
                 group_id,
                 peer_id: msg_peer_id,

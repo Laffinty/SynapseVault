@@ -32,14 +32,16 @@ pub fn build_behaviour(
 ) -> Result<SynapseBehaviour, TransportError> {
     let local_peer_id = PeerId::from(local_keypair.public());
 
-    // Gossipsub 配置：限制消息大小，启用签名验证
+    // Gossipsub 配置：针对 LAN 小团队优化
     let gossipsub_config = gossipsub::ConfigBuilder::default()
-        .max_transmit_size(262_144)
-        .heartbeat_interval(Duration::from_secs(10))
+        .max_transmit_size(1_048_576)        // 1 MB，支持较大区块批次
+        .heartbeat_interval(Duration::from_secs(5)) // 5s，小型网络更快收敛
         .validation_mode(gossipsub::ValidationMode::Strict)
-        .mesh_n_high(6)
-        .mesh_n_low(4)
-        .mesh_outbound_min(2)
+        .mesh_n_high(4)                      // 小团队降低 mesh 上限
+        .mesh_n_low(2)                       // 小团队降低 mesh 下限
+        .mesh_outbound_min(1)                // 最少 1 个出站
+        .fanout_ttl(Duration::from_secs(30))
+        .history_length(10)                  // 消息去重窗口
         .build()
         .map_err(|e| TransportError::Config(e.to_string()))?;
 

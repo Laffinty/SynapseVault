@@ -112,15 +112,14 @@ pub fn init_schema(conn: &Connection) -> Result<(), StorageError> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS audit_index (
             event_id            TEXT PRIMARY KEY,
-            block_height        INTEGER NOT NULL,
+            block_height        INTEGER,
             operation_type      TEXT NOT NULL,
             actor_member_id     TEXT NOT NULL,
             target_secret_id    TEXT,
             device_fingerprint  TEXT NOT NULL,
             peer_id             TEXT NOT NULL,
             client_ip           TEXT,
-            timestamp           TEXT NOT NULL,
-            FOREIGN KEY (block_height) REFERENCES blocks(height)
+            timestamp           TEXT NOT NULL
         );",
         [],
     )?;

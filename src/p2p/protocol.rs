@@ -59,6 +59,11 @@ pub enum P2pMessage {
         group_id: GroupId,
         from_height: u64,
     },
+    /// 链同步响应
+    ChainSyncResponse {
+        group_id: GroupId,
+        blocks: Vec<BlockBrief>,
+    },
     /// 心跳/保活
     Heartbeat {
         group_id: GroupId,
@@ -75,6 +80,19 @@ pub struct AuditEventBrief {
     pub operation_type: String,
     pub actor_member_id: String,
     pub target_secret_id: Option<SecretId>,
+    pub signature: Vec<u8>,
+}
+
+/// 简化的区块摘要（用于链同步响应）
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlockBrief {
+    pub height: u64,
+    pub block_hash: String,
+    pub prev_hash: String,
+    pub timestamp: String,
+    pub signer_pubkey: String,
+    pub ops_data: Vec<u8>,
+    pub merkle_root: String,
     pub signature: Vec<u8>,
 }
 

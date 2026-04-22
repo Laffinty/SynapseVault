@@ -89,6 +89,30 @@ impl GossipManager {
     ) -> Result<(), GossipError> {
         self.broadcast(swarm, group_id, TOPIC_CONTROL, msg)
     }
+
+    /// 广播区块链消息到 chain topic
+    pub fn broadcast_chain(
+        &self,
+        swarm: &mut Swarm<SynapseBehaviour>,
+        group_id: &str,
+        msg: &P2pMessage,
+    ) -> Result<(), GossipError> {
+        self.broadcast(swarm, group_id, TOPIC_CHAIN, msg)
+    }
+
+    /// 发送链同步请求到 chain topic
+    pub fn request_chain_sync(
+        &self,
+        swarm: &mut Swarm<SynapseBehaviour>,
+        group_id: &str,
+        from_height: u64,
+    ) -> Result<(), GossipError> {
+        let msg = P2pMessage::ChainSyncRequest {
+            group_id: group_id.to_string(),
+            from_height,
+        };
+        self.broadcast(swarm, group_id, TOPIC_CHAIN, &msg)
+    }
 }
 
 impl Default for GossipManager {

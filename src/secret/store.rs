@@ -217,6 +217,113 @@ impl<'a> SecretStore<'a> {
         rows
     }
 
+    /// 分页列出密码条目
+    pub fn list_secrets_paginated(
+        &self,
+        group_id: Option<&GroupId>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<SecretMeta>, usize), SecretEntryError> {
+        let total = self.count_secrets(group_id)?;
+        let page = self.list_secrets_offset(group_id, limit, offset)?;
+        Ok((page, total))
+    }
+
+    /// 统计密码条目数量
+    pub fn count_secrets(&self, group_id: Option<&GroupId>) -> Result<usize, SecretEntryError> {
+        let sql = if group_id.is_some() {
+            "SELECT COUNT(*) FROM secrets WHERE group_id = ?1"
+        } else {
+            "SELECT COUNT(*) FROM secrets"
+        };
+
+        let count = if let Some(gid) = group_id {
+            self.conn
+                .query_row(sql, params![gid], |row| row.get::<_, i64>(0))
+        } else {
+            self.conn.query_row(sql, [], |row| row.get::<_, i64>(0))
+        }
+        .map_err(SecretEntryError::from)?;
+
+        Ok(count as usize)
+    }
+
+    /// 带偏移量列出密码条目
+    fn list_secrets_offset(
+        &self,
+        group_id: Option<&GroupId>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<SecretMeta>, SecretEntryError> {
+        let sql = if group_id.is_some() {
+            "SELECT secret_id, title, username, environment, tags, updated_at, expires_at
+             FROM secrets WHERE group_id = ?1 ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3"
+        } else {
+            "SELECT secret_id, title, username, environment, tags, updated_at, expires_at
+             FROM secrets ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2"
+        };
+
+        let rows = if let Some(gid) = group_id {
+            self.conn
+                .prepare(sql)?
+                .query_map(params![gid, limit as i64, offset as i64], |row| {
+                    let tags_str: String = row.get(4)?;
+                    let tags: Vec<String> = if tags_str.is_empty() {
+                        Vec::new()
+                    } else {
+                        tags_str.split(',').map(|s| s.trim().to_string()).collect()
+                    };
+                    Ok(SecretMeta {
+                        secret_id: row.get(0)?,
+                        title: row.get(1)?,
+                        username: row.get(2)?,
+                        environment: row.get(3)?,
+                        tags,
+                        updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now()),
+                        expires_at: row.get::<_, Option<String>>(6)?.and_then(|s| {
+                            DateTime::parse_from_rfc3339(&s)
+                                .map(|dt| dt.with_timezone(&Utc))
+                                .ok()
+                        }),
+                    })
+                })?
+                .collect::<Result<Vec<_>, rusqlite::Error>>()
+                .map_err(SecretEntryError::from)?
+        } else {
+            self.conn
+                .prepare(sql)?
+                .query_map(params![limit as i64, offset as i64], |row| {
+                    let tags_str: String = row.get(4)?;
+                    let tags: Vec<String> = if tags_str.is_empty() {
+                        Vec::new()
+                    } else {
+                        tags_str.split(',').map(|s| s.trim().to_string()).collect()
+                    };
+                    Ok(SecretMeta {
+                        secret_id: row.get(0)?,
+                        title: row.get(1)?,
+                        username: row.get(2)?,
+                        environment: row.get(3)?,
+                        tags,
+                        updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now()),
+                        expires_at: row.get::<_, Option<String>>(6)?.and_then(|s| {
+                            DateTime::parse_from_rfc3339(&s)
+                                .map(|dt| dt.with_timezone(&Utc))
+                                .ok()
+                        }),
+                    })
+                })?
+                .collect::<Result<Vec<_>, rusqlite::Error>>()
+                .map_err(SecretEntryError::from)?
+        };
+
+        Ok(rows)
+    }
+
     /// 更新密码条目
     #[allow(clippy::too_many_arguments)]
     pub fn update_secret(

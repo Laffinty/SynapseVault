@@ -70,6 +70,11 @@ impl Member {
     pub fn is_active(&self) -> bool {
         self.status == MemberStatus::Active
     }
+
+    /// 检查成员是否为活跃 Admin
+    pub fn is_admin(&self) -> bool {
+        self.role == Role::Admin && self.is_active()
+    }
 }
 
 #[cfg(test)]
@@ -94,6 +99,22 @@ mod tests {
         assert!(member.is_active());
         member.revoke();
         assert!(!member.is_active());
+    }
+
+    #[test]
+    fn test_member_is_admin() {
+        let (_sk, vk) = generate_keypair();
+        let mut admin = Member::from_public_key(vk, Role::Admin, "uid:hash".to_string());
+        admin.activate();
+        assert!(admin.is_admin());
+
+        let (_sk2, vk2) = generate_keypair();
+        let mut user = Member::from_public_key(vk2, Role::FreeUser, "uid:hash".to_string());
+        user.activate();
+        assert!(!user.is_admin());
+
+        admin.revoke();
+        assert!(!admin.is_admin()); // Revoked Admin is not admin
     }
 
     #[test]

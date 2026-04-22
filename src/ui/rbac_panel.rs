@@ -54,6 +54,23 @@ pub fn render_rbac_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) 
         app.pending_role_change = Some(role_changes.remove(0));
     }
 
+    // Admin 使用审批入口
+    if is_admin {
+        ui.add_space(8.0);
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("使用审批").size(16.0).strong());
+            let pending_count = app.pending_usage_requests.len();
+            if pending_count > 0 {
+                ui.label(format!("待审批请求: {} 条", pending_count));
+                if ui.button("📋 查看待审批请求").clicked() {
+                    app.show_usage_approve = true;
+                }
+            } else {
+                ui.label("暂无待审批的使用请求。");
+            }
+        });
+    }
+
     // 渲染角色变更确认弹窗
     if let Some((target_id, new_role)) = app.pending_role_change.clone() {
         let mut confirmed = false;
@@ -105,6 +122,29 @@ pub fn render_rbac_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) 
                             op.old_role,
                             op.new_role
                         );
+                        // Phase 5: 持久化角色变更到数据库
+                        if let Some(ref conn) = app.db_conn {
+                            if let Err(e) = persist_role_change(conn, &target_id, new_role) {
+                                tracing::warn!("角色变更持久化失败: {}", e);
+                            } else {
+                                tracing::info!("角色变更已持久化到数据库");
+                            }
+                        }
+                        // 记录审计日志
+                        if let Some(ref conn) = app.db_conn {
+                            let event = crate::audit::event::AuditEvent::new(
+                                format!("role_change_{}", uuid::Uuid::new_v4()),
+                                crate::audit::event::OperationType::RoleChange,
+                                hex::encode(session.public_key.as_bytes()),
+                                session.device_fingerprint.clone(),
+                                "local".to_string(),
+                            )
+                            .with_summary(format!(
+                                "将 {} 从 {} 变更为 {}",
+                                target_id, op.old_role, op.new_role
+                            ));
+                            let _ = crate::audit::logger::log_event(conn, &event, None);
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("角色变更失败: {}", e);
@@ -151,6 +191,19 @@ pub fn render_rbac_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) 
             });
         });
     });
+}
+
+/// 将角色变更持久化到数据库
+fn persist_role_change(
+    conn: &rusqlite::Connection,
+    member_id: &str,
+    new_role: Role,
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "UPDATE members SET role = ?1 WHERE member_id = ?2",
+        rusqlite::params![new_role.to_string(), member_id],
+    )?;
+    Ok(())
 }
 
 fn render_member_row(

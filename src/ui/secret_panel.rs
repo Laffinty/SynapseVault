@@ -60,7 +60,33 @@ pub fn render_secret_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui
             }
         });
     } else {
-        render_secret_table(app, ctx, ui, &secrets);
+        let total = secrets.len();
+        let per_page = app.secrets_per_page;
+        let total_pages = total.div_ceil(per_page);
+        if app.secret_page >= total_pages {
+            app.secret_page = total_pages.saturating_sub(1);
+        }
+        let page = app.secret_page;
+        let start = page * per_page;
+        let end = (start + per_page).min(total);
+        let page_secrets: Vec<SecretMeta> = secrets[start..end].to_vec();
+        app.total_secrets_count = total;
+
+        render_secret_table(app, ctx, ui, &page_secrets);
+
+        // 分页控件
+        if total_pages > 1 {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui.button("◀ 上一页").clicked() && page > 0 {
+                    app.secret_page -= 1;
+                }
+                ui.label(format!("第 {} / {} 页  (共 {} 条)", page + 1, total_pages, total));
+                if ui.button("下一页 ▶").clicked() && page + 1 < total_pages {
+                    app.secret_page += 1;
+                }
+            });
+        }
     }
 }
 
@@ -202,10 +228,10 @@ fn render_secret_table(
 
                     ui.horizontal(|ui| {
                         if ui.button("👁 查看").clicked() {
-                            app.show_dialog = Some(format!("view_secret:{}", secret.secret_id));
+                            app.active_dialog = Some(crate::app::DialogState::ViewSecret { secret_id: secret.secret_id.clone() });
                         }
                         if ui.button("📋 复制").clicked() {
-                            app.show_dialog = Some(format!("copy_secret:{}", secret.secret_id));
+                            app.active_dialog = Some(crate::app::DialogState::CopySecret { secret_id: secret.secret_id.clone() });
                         }
                     });
                 });

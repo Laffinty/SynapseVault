@@ -13,6 +13,8 @@ use crate::ui::dialogs::approve_member::{
 };
 use crate::ui::dialogs::create_group::{render_create_group_dialog, CreateGroupDialog, CreateGroupResult};
 use crate::ui::dialogs::join_group::{render_join_group_dialog, JoinGroupDialog, JoinGroupResult};
+use crate::ui::audit_panel::render_audit_panel;
+use crate::ui::dialogs::audit_detail::{render_audit_detail_dialog, AuditDetailDialog};
 use crate::ui::dialogs::view_secret::{render_view_secret_dialog, ViewSecretDialog};
 use crate::ui::group_panel::render_group_panel;
 use crate::ui::rbac_panel::render_rbac_panel;
@@ -22,6 +24,7 @@ use egui::{Context, Visuals};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use zeroize::Zeroize;
 
 /// 应用面板枚举
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -38,6 +41,25 @@ pub enum Panel {
 pub enum ThemeMode {
     Dark,
     Light,
+}
+
+/// 弹窗状态枚举（替换原有的 show_dialog: Option<String>）
+#[derive(Clone, Debug, PartialEq)]
+pub enum DialogState {
+    /// 忘记密码确认
+    ForgetPassword,
+    /// 查看密码
+    ViewSecret { secret_id: String },
+    /// 复制密码
+    CopySecret { secret_id: String },
+    /// 审计面板筛选
+    AuditFilterType { operation_type: Option<crate::audit::event::OperationType> },
+    /// 审计面板刷新
+    AuditRefresh,
+    /// 审计面板导出
+    AuditExport { format: crate::audit::export::ExportFormat },
+    /// 申请查看密码（AuditUser）
+    RequestUsage { secret_id: String },
 }
 
 /// 解锁状态
@@ -78,7 +100,7 @@ pub struct SynapseVaultApp {
     pub clipboard: SecureClipboard,
 
     // 弹窗状态
-    pub show_dialog: Option<String>,
+    pub active_dialog: Option<DialogState>,
 
     // 数据库连接
     pub db_conn: Option<rusqlite::Connection>,
@@ -108,6 +130,28 @@ pub struct SynapseVaultApp {
     pub pending_requests_cache: Vec<JoinRequest>,
     /// 待确认的角色变更操作（目标成员 ID, 新角色）
     pub pending_role_change: Option<(String, Role)>,
+
+    // ===== Phase 5: 审计与区块链 =====
+    /// 审计详情弹窗
+    pub audit_detail_dialog: Option<AuditDetailDialog>,
+    /// 当前使用审批（AuditUser 查看密码前需要）
+    pub usage_approval: Option<crate::rbac::policy::UsageApproval>,
+    /// 使用审批 TTL（分钟）
+    pub approval_ttl_minutes: u64,
+    /// 区块生产者
+    pub block_producer: Option<crate::blockchain::chain::BlockProducer>,
+    /// 本地区块链
+    pub local_chain: Option<crate::blockchain::chain::Blockchain>,
+    /// 使用申请弹窗
+    pub usage_request_dialog: Option<crate::ui::dialogs::usage_request::UsageRequestDialog>,
+    /// 使用审批弹窗
+    pub show_usage_approve: bool,
+    /// 待审批的使用请求列表
+    pub pending_usage_requests: Vec<crate::rbac::policy::UsageRequest>,
+    /// 密码列表分页
+    pub secret_page: usize,
+    pub secrets_per_page: usize,
+    pub total_secrets_count: usize,
 }
 
 impl Default for SynapseVaultApp {
@@ -136,7 +180,7 @@ impl Default for SynapseVaultApp {
             secret_search_query: String::new(),
             secret_metas: HashMap::new(),
             clipboard: SecureClipboard::new(),
-            show_dialog: None,
+            active_dialog: None,
             db_conn: None,
             view_secret_dialog: None,
             current_group: None,
@@ -149,6 +193,17 @@ impl Default for SynapseVaultApp {
             received_join_requests: Vec::new(),
             pending_requests_cache: Vec::new(),
             pending_role_change: None,
+            audit_detail_dialog: None,
+            usage_approval: None,
+            approval_ttl_minutes: 5,
+            block_producer: None,
+            local_chain: None,
+            usage_request_dialog: None,
+            show_usage_approve: false,
+            pending_usage_requests: Vec::new(),
+            secret_page: 0,
+            secrets_per_page: 50,
+            total_secrets_count: 0,
         }
     }
 }
@@ -161,9 +216,19 @@ impl SynapseVaultApp {
     }
 
     fn apply_theme(&self, ctx: &Context) {
+        let is_dark = self.theme == ThemeMode::Dark;
+        let theme = crate::ui::theme::theme_for_mode(is_dark);
         match self.theme {
-            ThemeMode::Dark => ctx.set_visuals(Visuals::dark()),
-            ThemeMode::Light => ctx.set_visuals(Visuals::light()),
+            ThemeMode::Dark => {
+                let mut v = Visuals::dark();
+                theme.apply_to_visuals(&mut v);
+                ctx.set_visuals(v);
+            }
+            ThemeMode::Light => {
+                let mut v = Visuals::light();
+                theme.apply_to_visuals(&mut v);
+                ctx.set_visuals(v);
+            }
         }
     }
 
@@ -196,8 +261,8 @@ impl SynapseVaultApp {
                     self.unlock_state = UnlockState::Unlocked;
                     self.is_first_setup = false;
                     self.unlock_error = None;
-                    self.password_input.clear();
-                    self.confirm_password.clear();
+                    self.password_input.zeroize();
+                    self.confirm_password.zeroize();
                     self.open_database_and_load_secrets();
                 }
                 Err(err) => {
@@ -219,7 +284,7 @@ impl SynapseVaultApp {
                 }
             }
             UnlockAction::ForgotPassword => {
-                self.show_dialog = Some("forget_password".to_string());
+                self.active_dialog = Some(DialogState::ForgetPassword);
             }
             UnlockAction::BrowseKeyFile => {
                 let picked = if self.is_first_setup {
@@ -388,8 +453,121 @@ impl SynapseVaultApp {
         group
             .member_map
             .get(&my_id)
-            .map(|m| m.role == crate::rbac::role::Role::Admin && m.is_active())
+            .map(|m| m.is_admin())
             .unwrap_or(false)
+    }
+
+    /// 获取当前用户角色
+    fn current_user_role(&self) -> Option<crate::rbac::role::Role> {
+        let session = self.session.as_ref()?;
+        let group = self.current_group.as_ref()?;
+        let my_id = hex::encode(session.public_key.as_bytes());
+        group.member_map.get(&my_id).map(|m| m.role)
+    }
+
+    /// Phase 5: 检查使用审批（AuditUser 需要有效的 UsageApproval）
+    fn check_usage_approval(&self, _secret_id: &str) -> Result<(), String> {
+        let role = self.current_user_role();
+        match role {
+            Some(crate::rbac::role::Role::Admin) | Some(crate::rbac::role::Role::FreeUser) => Ok(()),
+            Some(crate::rbac::role::Role::AuditUser) => {
+                if let Some(ref approval) = self.usage_approval {
+                    if approval.expires_at > chrono::Utc::now() {
+                        Ok(())
+                    } else {
+                        Err("使用审批已过期，请重新申请。".to_string())
+                    }
+                } else {
+                    Err("AuditUser 查看/复制密码需要 Admin 审批。请在使用请求面板申请。".to_string())
+                }
+            }
+            None => Err("无法确定用户角色。".to_string()),
+        }
+    }
+
+    /// Phase 5: 记录查看密码审计日志
+    fn log_audit_view_secret(&self, secret_id: &str) {
+        if let (Some(ref session), Some(ref conn)) = (&self.session, &self.db_conn) {
+            let event = crate::audit::event::AuditEvent::new(
+                format!("view_{}", uuid::Uuid::new_v4()),
+                crate::audit::event::OperationType::ViewSecret,
+                hex::encode(session.public_key.as_bytes()),
+                session.device_fingerprint.clone(),
+                "local".to_string(),
+            )
+            .with_secret_id(secret_id.to_string());
+            let _ = crate::audit::logger::log_event(conn, &event, None);
+        }
+    }
+
+    /// Phase 5: 记录复制密码审计日志
+    fn log_audit_copy_secret(&self, secret_id: &str) {
+        if let (Some(ref session), Some(ref conn)) = (&self.session, &self.db_conn) {
+            let event = crate::audit::event::AuditEvent::new(
+                format!("copy_{}", uuid::Uuid::new_v4()),
+                crate::audit::event::OperationType::CopySecret,
+                hex::encode(session.public_key.as_bytes()),
+                session.device_fingerprint.clone(),
+                "local".to_string(),
+            )
+            .with_secret_id(secret_id.to_string());
+            let _ = crate::audit::logger::log_event(conn, &event, None);
+        }
+    }
+
+    /// 尝试生产新区块（双阈值触发：操作数或时间间隔）
+    fn try_produce_block(&mut self) {
+        let Some(ref mut producer) = self.block_producer else { return };
+        if !producer.should_produce_block() {
+            return;
+        }
+        let Some(ref mut chain) = self.local_chain else { return };
+        let Some(ref _session) = self.session else { return };
+        let Some(ref signing_key) = self.group_signing_key else { return };
+
+        match producer.produce_block(chain, &signing_key.private_key) {
+            Ok(Some(_block)) => {
+                if let Some(ref conn) = self.db_conn {
+                    let _ = chain.save_to_db(conn);
+                }
+                tracing::info!("新区块已生成，当前高度: {}", chain.height());
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!("区块生产失败: {}", e);
+            }
+        }
+    }
+
+    /// 处理 P2P 审计事件批次（远程同步）
+    pub fn handle_audit_batch_sync(
+        &mut self,
+        _from_peer: &str,
+        group_id: &str,
+        events: &[crate::p2p::protocol::AuditEventBrief],
+    ) {
+        let Some(ref conn) = self.db_conn else { return };
+        let current_group = self.current_group.as_ref().map(|g| g.group_id.as_str()).unwrap_or("");
+        if group_id != current_group {
+            return; // 不属于当前组，忽略
+        }
+
+        for brief in events {
+            let event = crate::audit::event::AuditEvent::new(
+                brief.event_id.clone(),
+                crate::audit::logger::parse_operation_type(&brief.operation_type),
+                brief.actor_member_id.clone(),
+                String::new(), // device_fingerprint not in brief
+                String::new(), // peer_id not in brief
+            )
+            .with_secret_id(brief.target_secret_id.clone().unwrap_or_default());
+
+            match crate::audit::logger::sync_event(conn, &event, None) {
+                Ok(true) => tracing::debug!("同步审计事件: {}", brief.event_id),
+                Ok(false) => {} // 已存在
+                Err(e) => tracing::warn!("同步审计事件失败: {}", e),
+            }
+        }
     }
 
     /// 刷新待审批请求缓存（去重）
@@ -434,8 +612,8 @@ impl SynapseVaultApp {
     fn lock_app(&mut self) {
         self.unlock_state = UnlockState::Locked;
         self.session = None;
-        self.password_input.clear();
-        self.confirm_password.clear();
+        self.password_input.zeroize();
+        self.confirm_password.zeroize();
         self.unlock_error = None;
         self.db_conn = None;
         self.secret_metas.clear();
@@ -450,6 +628,13 @@ impl SynapseVaultApp {
         self.received_join_requests.clear();
         self.pending_requests_cache.clear();
         self.pending_role_change = None;
+        self.audit_detail_dialog = None;
+        self.usage_approval = None;
+        self.block_producer = None;
+        self.local_chain = None;
+        self.usage_request_dialog = None;
+        self.show_usage_approve = false;
+        self.pending_usage_requests.clear();
     }
 }
 
@@ -458,6 +643,9 @@ impl eframe::App for SynapseVaultApp {
         let ctx = ui.ctx().clone();
         // 1. 轮询解锁线程结果
         self.poll_unlock_result();
+
+        // 1.5 尝试生产新区块
+        self.try_produce_block();
 
         // 2. 根据解锁状态渲染界面
         match self.unlock_state {
@@ -562,116 +750,207 @@ impl eframe::App for SynapseVaultApp {
                         render_rbac_panel(self, &ctx, ui);
                     }
                     Panel::AuditLog => {
-                        ui.heading("📋 审计日志");
-                        ui.label("区块链审计记录将在此显示。");
+                        render_audit_panel(self, &ctx, ui);
                     }
                     Panel::Settings => {
                         ui.heading("⚙️ 设置");
-                        ui.label("应用设置与配置。");
+                        ui.add_space(8.0);
+
+                        // 使用审批 TTL
+                        ui.group(|ui| {
+                            ui.label("使用审批有效期（分钟）:");
+                            ui.add(egui::DragValue::new(&mut self.approval_ttl_minutes)
+                                .range(1..=60)
+                                .speed(0.1));
+                            ui.label(format!("当前: {} 分钟", self.approval_ttl_minutes));
+                        });
+
+                        ui.add_space(8.0);
+
+                        // 主题切换
+                        ui.group(|ui| {
+                            ui.label("主题:");
+                            ui.horizontal(|ui| {
+                                if ui.selectable_label(self.theme == ThemeMode::Dark, "深色").clicked() {
+                                    self.theme = ThemeMode::Dark;
+                                    self.apply_theme(&ctx);
+                                }
+                                if ui.selectable_label(self.theme == ThemeMode::Light, "浅色").clicked() {
+                                    self.theme = ThemeMode::Light;
+                                    self.apply_theme(&ctx);
+                                }
+                            });
+                        });
+
+                        ui.add_space(16.0);
+                        ui.separator();
+                        ui.label(format!("SynapseVault v{}", env!("CARGO_PKG_VERSION")));
+                        ui.label("MIT License");
                     }
                 });
             }
         }
 
         // 3. 渲染弹窗
-        if let Some(ref dialog) = self.show_dialog.clone() {
+        if let Some(ref dialog) = self.active_dialog.clone() {
             let mut close = false;
-            egui::Window::new("提示")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                .show(&ctx, |ui| {
-                    match dialog.as_str() {
-                        "forget_password" => {
+            match dialog {
+                DialogState::ForgetPassword => {
+                    egui::Window::new("忘记密码")
+                        .collapsible(false)
+                        .resizable(false)
+                        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                        .show(&ctx, |ui| {
                             ui.label("忘记密码将重置本地身份，需要重新申请加入组。");
                             ui.colored_label(egui::Color32::RED, "警告：本地数据将无法恢复！");
                             ui.add_space(10.0);
-                            if ui.button("重置密钥文件").clicked() {
-                                let _ = std::fs::remove_file(&self.key_file_path);
-                                self.is_first_setup = true;
-                                self.lock_app();
-                                close = true;
-                            }
-                        }
-                        "create_group_placeholder" => {
-                            ui.label("请使用组管理面板中的「创建新组」按钮。");
-                        }
-                        "discover_groups_placeholder" => {
-                            ui.label("请使用组管理面板中的「发现组」按钮。");
-                        }
-                        dialog_str if dialog_str.starts_with("view_secret:") => {
-                            if let Some(secret_id) = dialog_str.strip_prefix("view_secret:") {
-                                if let Some(ref conn) = self.db_conn {
-                                    if let Some(ref session) = self.session {
-                                        let store = SecretStore::new(conn);
-                                        match store.get_secret(&secret_id.to_string()) {
-                                            Ok(entry) => {
-                                                match store.decrypt_password(
-                                                    &secret_id.to_string(),
-                                                    &session.master_key,
-                                                ) {
-                                                    Ok(password) => {
-                                                        self.view_secret_dialog =
-                                                            Some(ViewSecretDialog::new(
-                                                                secret_id.to_string(),
-                                                                &entry,
-                                                                password,
-                                                            ));
-                                                    }
-                                                    Err(e) => {
-                                                        ui.label(format!("解密失败: {}", e));
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                ui.label(format!("获取密码条目失败: {}", e));
-                                            }
-                                        }
-                                    } else {
-                                        ui.label("会话未建立，无法查看密码。");
-                                    }
-                                } else {
-                                    ui.label("数据库未连接，无法查看密码。");
+                            ui.horizontal(|ui| {
+                                if ui.button("重置密钥文件").clicked() {
+                                    let _ = std::fs::remove_file(&self.key_file_path);
+                                    self.is_first_setup = true;
+                                    self.lock_app();
+                                    close = true;
                                 }
-                            }
-                            close = true;
-                        }
-                        dialog_str if dialog_str.starts_with("copy_secret:") => {
-                            if let Some(secret_id) = dialog_str.strip_prefix("copy_secret:") {
-                                if let Some(ref conn) = self.db_conn {
-                                    if let Some(ref session) = self.session {
-                                        let store = SecretStore::new(conn);
+                                if ui.button("取消").clicked() {
+                                    close = true;
+                                }
+                            });
+                        });
+                }
+                DialogState::ViewSecret { secret_id } => {
+                    if let Some(ref conn) = self.db_conn {
+                        if let Some(ref session) = self.session {
+                            if let Err(msg) = self.check_usage_approval(secret_id) {
+                                let sid = secret_id.clone();
+                                egui::Window::new("权限不足")
+                                    .collapsible(false)
+                                    .resizable(false)
+                                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                                    .show(&ctx, |ui| {
+                                        ui.colored_label(egui::Color32::YELLOW, msg);
+                                        ui.add_space(8.0);
+                                        if ui.button("📋 申请查看权限").clicked() {
+                                            self.active_dialog = Some(DialogState::RequestUsage { secret_id: sid });
+                                            return;
+                                        }
+                                        if ui.button("关闭").clicked() {
+                                            close = true;
+                                        }
+                                    });
+                            } else {
+                                let store = SecretStore::new(conn);
+                                match store.get_secret(&secret_id.to_string()) {
+                                    Ok(entry) => {
                                         match store.decrypt_password(
                                             &secret_id.to_string(),
                                             &session.master_key,
                                         ) {
                                             Ok(password) => {
-                                                let _ = self.clipboard.copy_secure(&password, 30);
-                                                ui.label("密码已复制到剪贴板（30秒后自动清除）。");
+                                                self.view_secret_dialog =
+                                                    Some(ViewSecretDialog::new(
+                                                        secret_id.to_string(),
+                                                        &entry,
+                                                        password,
+                                                    ));
+                                                self.log_audit_view_secret(secret_id);
                                             }
                                             Err(e) => {
-                                                ui.label(format!("解密失败: {}", e));
+                                                egui::Window::new("错误")
+                                                    .collapsible(false)
+                                                    .resizable(false)
+                                                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                                                    .show(&ctx, |ui| {
+                                                        ui.label(format!("解密失败: {}", e));
+                                                        if ui.button("关闭").clicked() {
+                                                            close = true;
+                                                        }
+                                                    });
                                             }
                                         }
-                                    } else {
-                                        ui.label("会话未建立，无法复制密码。");
                                     }
-                                } else {
-                                    ui.label("数据库未连接，无法复制密码。");
+                                    Err(e) => {
+                                        egui::Window::new("错误")
+                                            .collapsible(false)
+                                            .resizable(false)
+                                            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                                            .show(&ctx, |ui| {
+                                                ui.label(format!("获取密码条目失败: {}", e));
+                                                if ui.button("关闭").clicked() {
+                                                    close = true;
+                                                }
+                                            });
+                                    }
                                 }
+                                close = true; // view_secret 弹窗一次性触发
                             }
                         }
-                        _ => {
-                            ui.label(format!("未知弹窗: {}", dialog));
+                    }
+                }
+                DialogState::CopySecret { secret_id } => {
+                    if let Some(ref conn) = self.db_conn {
+                        if let Some(ref session) = self.session {
+                            if let Err(msg) = self.check_usage_approval(secret_id) {
+                                let sid = secret_id.clone();
+                                egui::Window::new("权限不足")
+                                    .collapsible(false)
+                                    .resizable(false)
+                                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                                    .show(&ctx, |ui| {
+                                        ui.colored_label(egui::Color32::YELLOW, msg);
+                                        ui.add_space(8.0);
+                                        if ui.button("📋 申请复制权限").clicked() {
+                                            self.active_dialog = Some(DialogState::RequestUsage { secret_id: sid });
+                                            return;
+                                        }
+                                        if ui.button("关闭").clicked() {
+                                            close = true;
+                                        }
+                                    });
+                            } else {
+                                let store = SecretStore::new(conn);
+                                match store.decrypt_password(
+                                    &secret_id.to_string(),
+                                    &session.master_key,
+                                ) {
+                                    Ok(mut password) => {
+                                        let _ = self.clipboard.copy_secure(&password, 30);
+                                        self.log_audit_copy_secret(secret_id);
+                                        password.zeroize();
+                                    }
+                                    Err(e) => {
+                                        egui::Window::new("错误")
+                                            .collapsible(false)
+                                            .resizable(false)
+                                            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                                            .show(&ctx, |ui| {
+                                                ui.label(format!("解密失败: {}", e));
+                                                if ui.button("关闭").clicked() {
+                                                    close = true;
+                                                }
+                                            });
+                                    }
+                                }
+                                close = true; // copy_secret 一次性触发
+                            }
                         }
                     }
-                    ui.add_space(10.0);
-                    if ui.button("关闭").clicked() {
-                        close = true;
-                    }
-                });
+                }
+                DialogState::AuditFilterType { .. } | DialogState::AuditRefresh => {
+                    // 审计面板状态变更，不需要弹窗，由审计面板自行处理
+                }
+                DialogState::AuditExport { .. } => {
+                    // 审计导出弹窗，由审计面板自行处理
+                }
+                DialogState::RequestUsage { secret_id } => {
+                    // 打开使用申请弹窗
+                    self.usage_request_dialog = Some(
+                        crate::ui::dialogs::usage_request::UsageRequestDialog::new(secret_id.clone())
+                    );
+                    close = true; // 清除 active_dialog，弹窗由 usage_request_dialog 管理
+                }
+            }
             if close {
-                self.show_dialog = None;
+                self.active_dialog = None;
             }
         }
 
@@ -683,6 +962,88 @@ impl eframe::App for SynapseVaultApp {
             };
             if !render_view_secret_dialog(&ctx, &mut dialog, &mut on_copy) {
                 self.view_secret_dialog = Some(dialog);
+            }
+        }
+
+        // 4.5 渲染审计详情弹窗
+        if let Some(mut dialog) = self.audit_detail_dialog.take() {
+            if !render_audit_detail_dialog(&ctx, &mut dialog) {
+                self.audit_detail_dialog = Some(dialog);
+            }
+        }
+
+        // 4.6 渲染使用申请弹窗
+        if let Some(mut dialog) = self.usage_request_dialog.take() {
+            let (submitted, closed) =
+                crate::ui::dialogs::usage_request::render_usage_request_simple(
+                    &ctx,
+                    &mut dialog.reason,
+                    &dialog.target_secret_id,
+                    &dialog.error,
+                );
+
+            if submitted {
+                // 创建使用请求
+                if let (Some(ref session), Some(ref group)) = (&self.session, &self.current_group) {
+                    let result = crate::rbac::policy::request_usage(
+                        &dialog.target_secret_id,
+                        &dialog.reason,
+                        &session.private_key,
+                        &group.member_map,
+                    );
+                    match result {
+                        Ok(req) => {
+                            // 本地暂存，等待 Admin 审批
+                            // 实际场景中应通过 P2P 发送给 Admin
+                            dialog.submitted = true;
+                            tracing::info!("使用请求已创建: {}", req.request_id);
+                        }
+                        Err(e) => {
+                            dialog.error = Some(e.to_string());
+                        }
+                    }
+                }
+                self.usage_request_dialog = Some(dialog);
+            } else if closed {
+                // 弹窗关闭
+            } else {
+                self.usage_request_dialog = Some(dialog);
+            }
+        }
+
+        // 4.7 渲染使用审批弹窗
+        if self.show_usage_approve {
+            let (approved_id, closed) =
+                crate::ui::dialogs::usage_approve::render_usage_approve_dialog(
+                    &ctx,
+                    &self.pending_usage_requests,
+                );
+
+            if let Some(request_id) = approved_id {
+                // 找到对应请求并审批
+                if let Some(req) = self.pending_usage_requests.iter().find(|r| r.request_id == request_id) {
+                    if let (Some(ref session), Some(ref group)) = (&self.session, &self.current_group) {
+                        let ttl = chrono::Duration::minutes(self.approval_ttl_minutes as i64);
+                        let result = crate::rbac::policy::approve_usage(
+                            req,
+                            &session.private_key,
+                            &group.member_map,
+                            Some(ttl),
+                        );
+                        match result {
+                            Ok(approval) => {
+                                tracing::info!("使用审批已通过: {}", approval.request_id);
+                                self.pending_usage_requests.retain(|r| r.request_id != request_id);
+                            }
+                            Err(e) => {
+                                tracing::warn!("审批失败: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+            if closed {
+                self.show_usage_approve = false;
             }
         }
 

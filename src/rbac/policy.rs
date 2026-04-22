@@ -155,9 +155,9 @@ pub fn check_permission(role: &Role, action: &Action) -> PermissionCheck {
     }
 }
 
-/// 检查成员是否为 Admin
+/// 检查成员是否为活跃 Admin（委托给 Member::is_admin）
 fn is_admin(member: &Member) -> bool {
-    member.role == Role::Admin && member.is_active()
+    member.is_admin()
 }
 
 /// Admin 变更目标成员的角色
@@ -229,9 +229,9 @@ pub fn request_usage(
     let requester = members
         .get(&requester_id)
         .ok_or_else(|| RbacError::PermissionDenied("请求者不在成员列表中".to_string()))?;
-    if requester.role != Role::AuditUser {
+    if requester.role != Role::AuditUser || !requester.is_active() {
         return Err(RbacError::PermissionDenied(
-            "仅 AuditUser 可发起使用请求".to_string(),
+            "仅活跃的 AuditUser 可发起使用请求".to_string(),
         ));
     }
 
@@ -554,6 +554,31 @@ mod tests {
         assert!(
             result.is_err(),
             "FreeUser 不应能发起使用请求"
+        );
+    }
+
+    #[test]
+    fn test_request_usage_requires_active_status() {
+        let (admin_sk, _) = generate_keypair();
+        let (revoked_sk, revoked_vk) = generate_keypair();
+        let mut members = HashMap::new();
+
+        let admin = make_admin_member(&admin_sk);
+        let mut revoked = Member::from_public_key(revoked_vk, Role::AuditUser, "fp".to_string());
+        revoked.status = MemberStatus::Revoked;
+        members.insert(admin.member_id.clone(), admin);
+        members.insert(revoked.member_id.clone(), revoked);
+
+        // 已撤销的 AuditUser 不能发起使用请求
+        let result = request_usage(
+            &"secret-123".to_string(),
+            "需要维护服务器",
+            &revoked_sk,
+            &members,
+        );
+        assert!(
+            result.is_err(),
+            "已撤销的 AuditUser 不应能发起使用请求"
         );
     }
 
