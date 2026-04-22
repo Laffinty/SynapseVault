@@ -1,11 +1,17 @@
 # Rust
 /target/
 Cargo.lock
+*.rlib
+*.dll
+*.so
+*.dylib
+*.exe
 
 # IDE
 .idea/
 *.iml
 .vscode/
+.fleet/
 *.swp
 *.swo
 *~
@@ -13,8 +19,17 @@ Cargo.lock
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# 运行时数据
+# Runtime data
 *.db
+*.db-shm
+*.db-wal
 *.key
 *.log
+/tmp/
+*.tmp
+*.bak
+
+# Test / benchmark artifacts
+*.proptest-regressions
