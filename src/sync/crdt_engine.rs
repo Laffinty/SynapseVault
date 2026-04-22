@@ -98,7 +98,7 @@ impl CrdtEngine {
                 }
 
                 if let Some(existing) = self.entries.get_mut(secret_id) {
-                    // 简单 LWW：如果时间戳更新则应用
+                    // LWW + 版本递增：如果时间戳 >= 现有时间戳则应用，同时版本号+1
                     if *updated_at >= existing.updated_at {
                         existing.encrypted_password = encrypted_password.clone();
                         existing.nonce = *nonce;
@@ -111,7 +111,7 @@ impl CrdtEngine {
                         ApplyResult::Stale
                     }
                 } else {
-                    // 本地不存在此条目，可能是乱序到达，暂存为 pending
+                    // 本地不存在此条目，可能是乱序到达，暂存为 pending（待后续同步补全）
                     self.snapshot.push_pending(actor.to_string(), op.clone());
                     ApplyResult::Applied
                 }

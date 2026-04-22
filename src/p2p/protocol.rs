@@ -96,6 +96,13 @@ pub struct BlockBrief {
     pub signature: Vec<u8>,
 }
 
+/// P2P 消息信封（包含 nonce 用于重放检测）
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct P2pMessageEnvelope {
+    pub nonce: u64,
+    pub payload: P2pMessage,
+}
+
 /// 序列化 P2pMessage 为 bytes（使用 bincode）
 pub fn serialize_message(msg: &P2pMessage) -> Result<Vec<u8>, ProtocolError> {
     bincode::serialize(msg).map_err(|e| ProtocolError::Serialize(e.to_string()))
@@ -103,6 +110,16 @@ pub fn serialize_message(msg: &P2pMessage) -> Result<Vec<u8>, ProtocolError> {
 
 /// 从 bytes 反序列化 P2pMessage
 pub fn deserialize_message(data: &[u8]) -> Result<P2pMessage, ProtocolError> {
+    bincode::deserialize(data).map_err(|e| ProtocolError::Deserialize(e.to_string()))
+}
+
+/// 序列化 P2pMessageEnvelope 为 bytes（使用 bincode）
+pub fn serialize_envelope(envelope: &P2pMessageEnvelope) -> Result<Vec<u8>, ProtocolError> {
+    bincode::serialize(envelope).map_err(|e| ProtocolError::Serialize(e.to_string()))
+}
+
+/// 从 bytes 反序列化 P2pMessageEnvelope
+pub fn deserialize_envelope(data: &[u8]) -> Result<P2pMessageEnvelope, ProtocolError> {
     bincode::deserialize(data).map_err(|e| ProtocolError::Deserialize(e.to_string()))
 }
 

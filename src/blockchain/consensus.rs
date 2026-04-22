@@ -111,8 +111,8 @@ pub fn create_block(
     // 计算 Merkle 根
     let leaves: Vec<Vec<u8>> = ops
         .iter()
-        .map(|op| bincode::serialize(op).unwrap())
-        .collect();
+        .map(|op| bincode::serialize(op).map_err(|e| ConsensusError::Serialization(e.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
     let merkle_root = compute_merkle_root(&leaves);
 
     let mut block = Block {
@@ -162,8 +162,8 @@ pub fn verify_merkle_root(block: &Block) -> Result<(), ConsensusError> {
         .map_err(|e| ConsensusError::Serialization(e.to_string()))?;
     let leaves: Vec<Vec<u8>> = ops
         .iter()
-        .map(|op| bincode::serialize(op).unwrap())
-        .collect();
+        .map(|op| bincode::serialize(op).map_err(|e| ConsensusError::Serialization(e.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
     let expected_root = compute_merkle_root(&leaves);
     if expected_root != block.merkle_root {
         return Err(ConsensusError::InvalidPrevHash);

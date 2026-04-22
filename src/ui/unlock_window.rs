@@ -36,6 +36,7 @@ pub enum UnlockAction {
 /// - `show_password`: 是否明文显示密码
 /// - `error`: 错误信息（渲染后由调用方清除）
 /// - `is_unlocking`: 是否正在解锁中（显示 spinner）
+/// - `is_calibrating`: 是否正在校准加密参数（首次设置时显示额外提示）
 ///
 /// # 返回
 /// 用户触发的动作（如果有）
@@ -48,6 +49,7 @@ pub fn render_unlock_window(
     show_password: &mut bool,
     error: &mut Option<String>,
     is_unlocking: bool,
+    is_calibrating: bool,
 ) -> Option<UnlockAction> {
     let screen_rect = ctx.viewport_rect();
     let window_size = match mode {
@@ -148,7 +150,11 @@ pub fn render_unlock_window(
                 // 操作按钮
                 if is_unlocking {
                     ui.add(egui::Spinner::new());
-                    ui.label("正在解锁，请稍候...");
+                    if is_calibrating {
+                        ui.label("正在校准加密参数，请稍候...");
+                    } else {
+                        ui.label("正在解锁，请稍候...");
+                    }
                 } else {
                     let btn_text = match mode {
                         UnlockWindowMode::FirstSetup => "创建密钥并进入",

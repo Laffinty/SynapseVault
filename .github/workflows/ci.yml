@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
   pull_request:
     branches: [main, master]
 
@@ -48,7 +49,7 @@ jobs:
       - run: cargo audit
 
   test:
-    name: Test
+    name: Test (${{ matrix.os }})
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -57,3 +58,62 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --all
+
+  build:
+    name: Build Release (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+
+  release:
+    name: Release
+    needs: [test, build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          mkdir -p synapse-vault-v1.0.0-${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/synapse-vault* synapse-vault-v1.0.0-${{ matrix.target }}/ || true
+          cp target/${{ matrix.target }}/release/synapse_vault* synapse-vault-v1.0.0-${{ matrix.target }}/ || true
+          tar czvf synapse-vault-v1.0.0-${{ matrix.target }}.tar.gz synapse-vault-v1.0.0-${{ matrix.target }}
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path synapse-vault-v1.0.0-${{ matrix.target }}
+          Copy-Item target/${{ matrix.target }}/release/synapse-vault.exe synapse-vault-v1.0.0-${{ matrix.target }}/ -ErrorAction SilentlyContinue
+          Copy-Item target/${{ matrix.target }}/release/synapse_vault.exe synapse-vault-v1.0.0-${{ matrix.target }}/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path synapse-vault-v1.0.0-${{ matrix.target }} -DestinationPath synapse-vault-v1.0.0-${{ matrix.target }}.zip
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: synapse-vault-v1.0.0-*.*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

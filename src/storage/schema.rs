@@ -188,7 +188,7 @@ pub fn migrate(conn: &Connection, target_version: u32) -> Result<(), StorageErro
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
     use rusqlite::Connection;

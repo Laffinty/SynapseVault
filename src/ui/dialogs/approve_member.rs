@@ -148,7 +148,7 @@ pub fn pending_join_requests_from_group(group: &Group) -> Vec<JoinRequest> {
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
     use crate::crypto::signing::generate_keypair;

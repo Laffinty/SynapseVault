@@ -25,7 +25,7 @@ impl ConflictResolver {
     /// 比较规则：
     /// 1. 先比较版本号（version），高的胜出
     /// 2. 版本号相同则比较时间戳（updated_at），新的胜出
-    /// 3. 时间戳也相同则比较 member_id 字典序（确定性仲裁）
+    /// 3. 时间戳也相同则比较 created_by 字典序（确定性仲裁）
     pub fn resolve_secret_conflict(
         local: &SecretEntry,
         remote: &SecretEntry,
@@ -85,11 +85,10 @@ pub fn merge_secret_entries(
 ) -> Option<SecretEntry> {
     // 删除优先
     if local_deleted || remote_deleted {
-        // 只要有一方删除，且另一方没有更新的修改，则删除
-        // 但如果另一方版本号明显更高，则保留
+        // 删除优先，但如果保留方的版本号明显更高则保留
         match (local, remote, local_deleted, remote_deleted) {
             (Some(l), Some(r), false, true) => {
-                // 本地有更新，远程已删除：如果本地版本更高，保留本地
+                // 本地有更新，远程已删除：若本地版本更高则保留本地，否则删除
                 if l.version > r.version {
                     Some(l.clone())
                 } else {
@@ -97,7 +96,7 @@ pub fn merge_secret_entries(
                 }
             }
             (Some(l), Some(r), true, false) => {
-                // 本地已删除，远程有更新：如果远程版本更高，保留远程
+                // 本地已删除，远程有更新：若远程版本更高则保留远程，否则删除
                 if r.version > l.version {
                     Some(r.clone())
                 } else {

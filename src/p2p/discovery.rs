@@ -3,7 +3,9 @@
 //! 处理 mDNS 发现事件，维护已发现的群组列表与 peer 地址映射。
 
 use crate::group::manager::{DiscoveredGroup, GroupId};
-use crate::p2p::protocol::{serialize_message, P2pMessage};
+use crate::p2p::protocol::{
+    serialize_envelope, P2pMessage, P2pMessageEnvelope,
+};
 use libp2p::gossipsub::IdentTopic;
 use libp2p::{mdns, Multiaddr, PeerId, Swarm};
 use std::collections::HashMap;
@@ -106,8 +108,11 @@ impl DiscoveryState {
         group: &DiscoveredGroup,
         topic: &IdentTopic,
     ) -> Result<(), DiscoveryError> {
-        let msg = P2pMessage::GroupAnnounce(group.clone());
-        let data = serialize_message(&msg)?;
+        let envelope = P2pMessageEnvelope {
+            nonce: rand::random(),
+            payload: P2pMessage::GroupAnnounce(group.clone()),
+        };
+        let data = serialize_envelope(&envelope)?;
         swarm
             .behaviour_mut()
             .gossipsub
@@ -126,7 +131,7 @@ pub enum DiscoveryError {
     Publish(String),
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
     use chrono::Utc;

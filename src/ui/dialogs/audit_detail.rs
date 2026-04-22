@@ -91,7 +91,7 @@ pub fn render_audit_detail_dialog(ctx: &Context, dialog: &mut AuditDetailDialog)
     closed
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
     use crate::audit::event::{AuditEvent, OperationType};

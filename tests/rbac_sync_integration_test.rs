@@ -1,3 +1,4 @@
+#![cfg(not(miri))]
 //! Phase 4 集成测试：RBAC 权限 + CRDT 同步
 //!
 //! 覆盖：

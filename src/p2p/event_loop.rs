@@ -10,7 +10,8 @@ use futures::StreamExt;
 use libp2p::gossipsub::Event as GossipsubEvent;
 use libp2p::swarm::SwarmEvent;
 use libp2p::{mdns, PeerId, Swarm};
-use std::collections::VecDeque;
+use sha2::{Digest, Sha256};
+use std::collections::{HashSet, VecDeque};
 use std::task::{Context, Poll, Wake};
 use std::sync::Arc;
 
@@ -57,6 +58,8 @@ pub struct EventLoop {
     pub events: VecDeque<P2pEvent>,
     /// 本地 PeerId
     pub local_peer_id: PeerId,
+    /// 已见过的消息 ID 集合（LRU 缓存，容量 1000）
+    pub seen_message_ids: HashSet<[u8; 32]>,
 }
 
 impl EventLoop {
@@ -64,6 +67,7 @@ impl EventLoop {
         Self {
             events: VecDeque::new(),
             local_peer_id,
+            seen_message_ids: HashSet::with_capacity(1000),
         }
     }
 
@@ -114,7 +118,25 @@ impl EventLoop {
             }) => {
                 let peer_str = propagation_source.to_string();
                 match parse_gossip_message(&message) {
-                    Ok(p2p_msg) => self.handle_p2p_message(&peer_str, p2p_msg),
+                    Ok(envelope) => {
+                        // 计算消息唯一 ID（peer + nonce 组合）
+                        let mut hasher = Sha256::new();
+                        hasher.update(peer_str.as_bytes());
+                        hasher.update(envelope.nonce.to_le_bytes());
+                        let msg_id: [u8; 32] = hasher.finalize().into();
+
+                        if self.seen_message_ids.contains(&msg_id) {
+                            tracing::debug!("丢弃重放消息 from {} nonce {}", peer_str, envelope.nonce);
+                            return;
+                        }
+
+                        if self.seen_message_ids.len() >= 1000 {
+                            self.seen_message_ids.clear();
+                        }
+                        self.seen_message_ids.insert(msg_id);
+
+                        self.handle_p2p_message(&peer_str, envelope.payload);
+                    }
                     Err(e) => {
                         tracing::warn!(
                             "Failed to parse gossip message from {}: {}",
@@ -239,7 +261,7 @@ impl EventLoop {
 /// 注意：实际类型名由宏生成，通常为 `<BehaviourName>ToSwarm`
 type SynapseBehaviourToSwarm = <SynapseBehaviour as libp2p::swarm::NetworkBehaviour>::ToSwarm;
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
     use crate::crypto::signing::generate_keypair;

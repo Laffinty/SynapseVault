@@ -126,7 +126,7 @@ fn escape_csv(s: &str) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 

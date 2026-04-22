@@ -74,6 +74,67 @@ pub fn generate_salt() -> [u8; 32] {
     salt
 }
 
+/// 校准 Argon2id 参数以达到目标耗时
+///
+/// 从最低参数开始（8192 KiB / 1 轮 / 1 线程），逐步增加 memory_cost 和 time_cost，
+/// 直到 `derive_master_key` 耗时接近 `target_ms`。
+///
+/// # 参数
+/// - `target_ms`: 目标耗时（毫秒），推荐 1000ms
+///
+/// # 返回
+/// 校准后的 Argon2 参数
+pub fn calibrate_argon2_params(target_ms: u64) -> Argon2Params {
+    const TEST_PASSWORD: &str = "calibration_password_12345";
+    let test_salt = [0xABu8; 32];
+
+    let mut best_params = Argon2Params::default();
+    let mut best_diff = u64::MAX;
+
+    let candidates = generate_candidate_params();
+
+    for params in candidates {
+        let start = std::time::Instant::now();
+        let _ = derive_master_key(TEST_PASSWORD, &test_salt, &params);
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        let diff = elapsed_ms.abs_diff(target_ms);
+
+        if diff < best_diff {
+            best_diff = diff;
+            best_params = params;
+        }
+
+        // 如果已经超时太多，提前停止（后续参数只会更慢）
+        if elapsed_ms > target_ms * 2 {
+            break;
+        }
+    }
+
+    best_params
+}
+
+/// 生成候选参数序列（从低到高）
+fn generate_candidate_params() -> Vec<Argon2Params> {
+    let mut params = Vec::new();
+    let memory_costs = [8192, 16384, 32768, 65536, 131072, 262144];
+    let time_costs = [1, 2, 3, 4, 5];
+    let parallelisms = [1, 2, 4];
+
+    for &m in &memory_costs {
+        for &t in &time_costs {
+            for &p in &parallelisms {
+                params.push(Argon2Params {
+                    memory_cost: m,
+                    time_cost: t,
+                    parallelism: p,
+                });
+            }
+        }
+    }
+    params
+}
+
 /// 使用 HKDF-SHA256 从主密钥派生子密钥
 pub fn hkdf_derive(master_key: &[u8; 32], info: &[u8], output: &mut [u8]) -> Result<(), KdfError> {
     let hk = Hkdf::<Sha256>::new(None, master_key);

@@ -190,7 +190,7 @@ pub fn parse_operation_type(s: &str) -> OperationType {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
     use crate::audit::event::AuditEvent;

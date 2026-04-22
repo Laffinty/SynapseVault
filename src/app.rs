@@ -13,12 +13,9 @@ use crate::ui::dialogs::approve_member::{
 };
 use crate::ui::dialogs::create_group::{render_create_group_dialog, CreateGroupDialog, CreateGroupResult};
 use crate::ui::dialogs::join_group::{render_join_group_dialog, JoinGroupDialog, JoinGroupResult};
-use crate::ui::audit_panel::render_audit_panel;
 use crate::ui::dialogs::audit_detail::{render_audit_detail_dialog, AuditDetailDialog};
 use crate::ui::dialogs::view_secret::{render_view_secret_dialog, ViewSecretDialog};
-use crate::ui::group_panel::render_group_panel;
-use crate::ui::rbac_panel::render_rbac_panel;
-use crate::ui::secret_panel::render_secret_panel;
+use crate::ui::main_layout::render_main_layout;
 use crate::ui::unlock_window::{render_unlock_window, UnlockAction, UnlockWindowMode};
 use egui::{Context, Visuals};
 use std::collections::HashMap;
@@ -52,12 +49,6 @@ pub enum DialogState {
     ViewSecret { secret_id: String },
     /// 复制密码
     CopySecret { secret_id: String },
-    /// 审计面板筛选
-    AuditFilterType { operation_type: Option<crate::audit::event::OperationType> },
-    /// 审计面板刷新
-    AuditRefresh,
-    /// 审计面板导出
-    AuditExport { format: crate::audit::export::ExportFormat },
     /// 申请查看密码（AuditUser）
     RequestUsage { secret_id: String },
 }
@@ -132,12 +123,16 @@ pub struct SynapseVaultApp {
     pub pending_role_change: Option<(String, Role)>,
 
     // ===== Phase 5: 审计与区块链 =====
+    /// 审计面板状态
+    pub audit_panel_state: crate::ui::audit_panel::AuditPanelState,
     /// 审计详情弹窗
     pub audit_detail_dialog: Option<AuditDetailDialog>,
     /// 当前使用审批（AuditUser 查看密码前需要）
     pub usage_approval: Option<crate::rbac::policy::UsageApproval>,
     /// 使用审批 TTL（分钟）
     pub approval_ttl_minutes: u64,
+    /// 自动锁定超时（分钟，0=禁用）
+    pub auto_lock_minutes: u64,
     /// 区块生产者
     pub block_producer: Option<crate::blockchain::chain::BlockProducer>,
     /// 本地区块链
@@ -152,6 +147,8 @@ pub struct SynapseVaultApp {
     pub secret_page: usize,
     pub secrets_per_page: usize,
     pub total_secrets_count: usize,
+    /// 侧边栏折叠状态
+    pub side_panel_collapsed: bool,
 }
 
 impl Default for SynapseVaultApp {
@@ -193,9 +190,11 @@ impl Default for SynapseVaultApp {
             received_join_requests: Vec::new(),
             pending_requests_cache: Vec::new(),
             pending_role_change: None,
+            audit_panel_state: crate::ui::audit_panel::AuditPanelState::default(),
             audit_detail_dialog: None,
             usage_approval: None,
             approval_ttl_minutes: 5,
+            auto_lock_minutes: 30,
             block_producer: None,
             local_chain: None,
             usage_request_dialog: None,
@@ -204,6 +203,7 @@ impl Default for SynapseVaultApp {
             secret_page: 0,
             secrets_per_page: 50,
             total_secrets_count: 0,
+            side_panel_collapsed: false,
         }
     }
 }
@@ -215,7 +215,7 @@ impl SynapseVaultApp {
         app
     }
 
-    fn apply_theme(&self, ctx: &Context) {
+    pub(crate) fn apply_theme(&self, ctx: &Context) {
         let is_dark = self.theme == ThemeMode::Dark;
         let theme = crate::ui::theme::theme_for_mode(is_dark);
         match self.theme {
@@ -232,7 +232,7 @@ impl SynapseVaultApp {
         }
     }
 
-    fn toggle_theme(&mut self, ctx: &Context) {
+    pub(crate) fn toggle_theme(&mut self, ctx: &Context) {
         self.theme = match self.theme {
             ThemeMode::Dark => ThemeMode::Light,
             ThemeMode::Light => ThemeMode::Dark,
@@ -365,6 +365,7 @@ impl SynapseVaultApp {
                 master_key,
                 device_fingerprint: fp.combined,
                 unlocked_at: chrono::Utc::now(),
+                argon2_params: key_file.argon2_params,
             };
 
             let mut guard = result_arc.lock().expect("unlock result mutex poisoned");
@@ -609,7 +610,7 @@ impl SynapseVaultApp {
     }
 
     /// 锁定应用
-    fn lock_app(&mut self) {
+    pub(crate) fn lock_app(&mut self) {
         self.unlock_state = UnlockState::Locked;
         self.session = None;
         self.password_input.zeroize();
@@ -656,6 +657,7 @@ impl eframe::App for SynapseVaultApp {
                     UnlockWindowMode::Unlock
                 };
 
+                let is_calibrating = self.is_first_setup && self.unlock_state == UnlockState::Unlocking;
                 let action = render_unlock_window(
                     &ctx,
                     mode,
@@ -665,6 +667,7 @@ impl eframe::App for SynapseVaultApp {
                     &mut self.show_password,
                     &mut self.unlock_error,
                     self.unlock_state == UnlockState::Unlocking,
+                    is_calibrating,
                 );
 
                 if let Some(action) = action {
@@ -672,122 +675,7 @@ impl eframe::App for SynapseVaultApp {
                 }
             }
             UnlockState::Unlocked => {
-                // 顶部栏
-                egui::Panel::top("top_bar").show_inside(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.heading("SynapseVault");
-                        ui.separator();
-
-                        ui.label("🔓 已解锁");
-                        ui.separator();
-                        ui.label("组: 未加入");
-                        ui.separator();
-                        ui.label("在线: 0/0");
-
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let theme_icon = match self.theme {
-                                ThemeMode::Dark => "☀️",
-                                ThemeMode::Light => "🌙",
-                            };
-                            if ui.button(theme_icon).clicked() {
-                                self.toggle_theme(&ctx);
-                            }
-                            if ui.button("⚙️").clicked() {
-                                self.current_panel = Panel::Settings;
-                            }
-                        });
-                    });
-                });
-
-                // 侧边栏
-                egui::Panel::left("side_panel")
-                    .exact_size(160.0)
-                    .show_inside(ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(10.0);
-                            ui.label("导航");
-                            ui.separator();
-                        });
-
-                        let buttons = [
-                            ("📁 组管理", Panel::GroupManagement),
-                            ("🔑 密码库", Panel::SecretVault),
-                            ("🛡️ 权限", Panel::RbacManagement),
-                            ("📋 审计", Panel::AuditLog),
-                        ];
-
-                        for (label, panel) in &buttons {
-                            let is_active = self.current_panel == *panel;
-                            let btn = egui::Button::new(*label)
-                                .fill(if is_active {
-                                    ui.visuals().selection.bg_fill
-                                } else {
-                                    ui.visuals().widgets.inactive.bg_fill
-                                })
-                                .min_size(egui::vec2(140.0, 32.0));
-                            if ui.add(btn).clicked() {
-                                self.current_panel = *panel;
-                            }
-                            ui.add_space(4.0);
-                        }
-
-                        ui.add_space(20.0);
-                        ui.separator();
-                        if ui.button("🔒 锁定").clicked() {
-                            self.lock_app();
-                        }
-                    });
-
-                // 中央面板
-                egui::CentralPanel::default().show_inside(ui, |ui| match self.current_panel {
-                    Panel::GroupManagement => {
-                        render_group_panel(self, &ctx, ui);
-                    }
-                    Panel::SecretVault => {
-                        render_secret_panel(self, &ctx, ui);
-                    }
-                    Panel::RbacManagement => {
-                        render_rbac_panel(self, &ctx, ui);
-                    }
-                    Panel::AuditLog => {
-                        render_audit_panel(self, &ctx, ui);
-                    }
-                    Panel::Settings => {
-                        ui.heading("⚙️ 设置");
-                        ui.add_space(8.0);
-
-                        // 使用审批 TTL
-                        ui.group(|ui| {
-                            ui.label("使用审批有效期（分钟）:");
-                            ui.add(egui::DragValue::new(&mut self.approval_ttl_minutes)
-                                .range(1..=60)
-                                .speed(0.1));
-                            ui.label(format!("当前: {} 分钟", self.approval_ttl_minutes));
-                        });
-
-                        ui.add_space(8.0);
-
-                        // 主题切换
-                        ui.group(|ui| {
-                            ui.label("主题:");
-                            ui.horizontal(|ui| {
-                                if ui.selectable_label(self.theme == ThemeMode::Dark, "深色").clicked() {
-                                    self.theme = ThemeMode::Dark;
-                                    self.apply_theme(&ctx);
-                                }
-                                if ui.selectable_label(self.theme == ThemeMode::Light, "浅色").clicked() {
-                                    self.theme = ThemeMode::Light;
-                                    self.apply_theme(&ctx);
-                                }
-                            });
-                        });
-
-                        ui.add_space(16.0);
-                        ui.separator();
-                        ui.label(format!("SynapseVault v{}", env!("CARGO_PKG_VERSION")));
-                        ui.label("MIT License");
-                    }
-                });
+                render_main_layout(self, &ctx, ui);
             }
         }
 
@@ -934,12 +822,6 @@ impl eframe::App for SynapseVaultApp {
                             }
                         }
                     }
-                }
-                DialogState::AuditFilterType { .. } | DialogState::AuditRefresh => {
-                    // 审计面板状态变更，不需要弹窗，由审计面板自行处理
-                }
-                DialogState::AuditExport { .. } => {
-                    // 审计导出弹窗，由审计面板自行处理
                 }
                 DialogState::RequestUsage { secret_id } => {
                     // 打开使用申请弹窗

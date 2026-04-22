@@ -2,7 +2,9 @@
 //!
 //! 封装 topic 管理、消息发布、订阅逻辑。
 
-use crate::p2p::protocol::{serialize_message, topic_name, P2pMessage};
+use crate::p2p::protocol::{
+    serialize_envelope, topic_name, P2pMessage, P2pMessageEnvelope,
+};
 use crate::p2p::transport::SynapseBehaviour;
 use libp2p::gossipsub::{IdentTopic, Message};
 use libp2p::Swarm;
@@ -61,7 +63,11 @@ impl GossipManager {
         msg: &P2pMessage,
     ) -> Result<(), GossipError> {
         let topic = IdentTopic::new(topic_name(group_id, category));
-        let data = serialize_message(msg)?;
+        let envelope = P2pMessageEnvelope {
+            nonce: rand::random(),
+            payload: msg.clone(),
+        };
+        let data = serialize_envelope(&envelope)?;
         swarm
             .behaviour_mut()
             .gossipsub
@@ -139,12 +145,12 @@ impl From<libp2p::gossipsub::SubscriptionError> for GossipError {
 }
 
 /// 解析收到的 gossipsub Message
-pub fn parse_gossip_message(msg: &Message) -> Result<P2pMessage, GossipError> {
-    crate::p2p::protocol::deserialize_message(&msg.data)
+pub fn parse_gossip_message(msg: &Message) -> Result<P2pMessageEnvelope, GossipError> {
+    crate::p2p::protocol::deserialize_envelope(&msg.data)
         .map_err(GossipError::Protocol)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 

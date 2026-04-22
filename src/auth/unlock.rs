@@ -5,7 +5,7 @@
 
 use crate::auth::device_fingerprint::DeviceFingerprint;
 use crate::auth::keyfile::{decode_key_file, KeyFileError};
-use crate::crypto::kdf::{derive_keyfile_key, derive_master_key};
+use crate::crypto::kdf::{derive_keyfile_key, derive_master_key, Argon2Params};
 use crate::crypto::symmetric::decrypt;
 use chrono::{DateTime, Utc};
 use ed25519_dalek::SigningKey;
@@ -23,6 +23,8 @@ pub struct UnlockedSession {
     pub device_fingerprint: String,
     /// 解锁时间
     pub unlocked_at: DateTime<Utc>,
+    /// Argon2 参数（用于展示和校准）
+    pub argon2_params: Argon2Params,
 }
 
 impl Zeroize for UnlockedSession {
@@ -32,6 +34,7 @@ impl Zeroize for UnlockedSession {
         self.master_key.zeroize();
         self.device_fingerprint.zeroize();
     }
+
 }
 
 impl Drop for UnlockedSession {
@@ -140,6 +143,7 @@ pub fn unlock_key_file(
         master_key,
         device_fingerprint: expected_fingerprint.combined.clone(),
         unlocked_at: Utc::now(),
+        argon2_params: key_file.argon2_params,
     })
 }
 
@@ -148,7 +152,7 @@ pub fn secure_zero(data: &mut [u8]) {
     data.zeroize();
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
     use crate::auth::device_fingerprint::generate_device_fingerprint;

@@ -2,7 +2,7 @@
 //!
 //! 在 egui 中展示审计日志列表、筛选与导出入口。
 
-use crate::app::{DialogState, SynapseVaultApp};
+use crate::app::SynapseVaultApp;
 use crate::audit::event::OperationType;
 use crate::audit::export::{export_events, ExportFormat};
 use crate::audit::logger::{query_events, AuditQuery};
@@ -26,29 +26,7 @@ pub fn render_audit_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui)
     ui.heading("📋 审计日志");
     ui.add_space(8.0);
 
-    // 从 active_dialog 解析当前筛选条件
-    let filter_type = app
-        .active_dialog
-        .as_ref()
-        .and_then(|d| match d {
-            DialogState::AuditFilterType { operation_type } => *operation_type,
-            _ => None,
-        });
-
-    // 处理一次性触发动作
-    if let Some(ref dialog) = app.active_dialog {
-        match dialog {
-            DialogState::AuditRefresh => {
-                app.active_dialog = Some(DialogState::AuditFilterType { operation_type: filter_type });
-            }
-            DialogState::AuditExport { format } => {
-                handle_audit_export(app, ctx, *format);
-                // 导出弹窗自行管理关闭
-                return;
-            }
-            _ => {}
-        }
-    }
+    let filter_type = app.audit_panel_state.filter_type;
 
     // 筛选栏
     ui.horizontal(|ui| {
@@ -79,7 +57,7 @@ pub fn render_audit_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui)
             .show_ui(ui, |ui| {
                 for (label, op) in &types {
                     if ui.selectable_label(*op == filter_type, *label).clicked() {
-                        app.active_dialog = Some(DialogState::AuditFilterType { operation_type: *op });
+                        app.audit_panel_state.filter_type = *op;
                     }
                 }
             });
@@ -87,19 +65,26 @@ pub fn render_audit_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui)
         ui.separator();
 
         if ui.button("🔄 刷新").clicked() {
-            app.active_dialog = Some(DialogState::AuditRefresh);
+            app.audit_panel_state.last_refresh = Some(Utc::now());
         }
 
         if ui.button("📤 导出 JSON").clicked() {
-            app.active_dialog = Some(DialogState::AuditExport { format: ExportFormat::Json });
+            app.audit_panel_state.show_export_dialog = true;
+            app.audit_panel_state.export_format = ExportFormat::Json;
         }
 
         if ui.button("📤 导出 CSV").clicked() {
-            app.active_dialog = Some(DialogState::AuditExport { format: ExportFormat::Csv });
+            app.audit_panel_state.show_export_dialog = true;
+            app.audit_panel_state.export_format = ExportFormat::Csv;
         }
     });
 
     ui.separator();
+
+    // 导出弹窗
+    if app.audit_panel_state.show_export_dialog {
+        handle_audit_export(app, ctx);
+    }
 
     // 加载事件
     let events = if let Some(ref conn) = app.db_conn {
@@ -154,9 +139,9 @@ pub fn render_audit_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui)
 fn handle_audit_export(
     app: &mut SynapseVaultApp,
     ctx: &Context,
-    format: ExportFormat,
 ) {
     let mut close = false;
+    let format = app.audit_panel_state.export_format;
     egui::Window::new("导出审计日志")
         .collapsible(false)
         .resizable(false)
@@ -215,6 +200,6 @@ fn handle_audit_export(
         });
 
     if close {
-        app.active_dialog = None;
+        app.audit_panel_state.show_export_dialog = false;
     }
 }

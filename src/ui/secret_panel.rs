@@ -255,7 +255,7 @@ fn is_expiring_soon(secret: &SecretMeta, now: DateTime<Utc>) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
     use crate::secret::entry::SecretMeta;

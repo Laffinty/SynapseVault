@@ -68,7 +68,7 @@ pub fn generate_key_file(
     master_password: &str,
 ) -> Result<(KeyFile, SigningKey, [u8; 32]), KeyFileError> {
     let salt = generate_salt();
-    let argon2_params = Argon2Params::default();
+    let argon2_params = crate::crypto::kdf::calibrate_argon2_params(1000);
 
     let master_key = crate::crypto::kdf::derive_master_key(master_password, &salt, &argon2_params)
         .map_err(|_| KeyFileError::EncryptFailed)?;
@@ -278,7 +278,7 @@ pub fn decode_key_file(data: &[u8]) -> Result<KeyFile, KeyFileError> {
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 
