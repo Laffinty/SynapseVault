@@ -12,6 +12,7 @@ Cargo.lock
 *.iml
 .vscode/
 .fleet/
+.claude/
 *.swp
 *.swo
 *~

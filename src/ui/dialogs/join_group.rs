@@ -42,7 +42,7 @@ pub fn render_join_group_dialog(
     let mut result = None;
     let mut open = true;
 
-    Window::new("🔍 发现组")
+    Window::new("发现组")
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -61,7 +61,7 @@ pub fn render_join_group_dialog(
                         let is_selected = dialog.selected_group_id.as_ref() == Some(group_id);
                         let response = ui.selectable_label(
                             is_selected,
-                            format!("📁 {} (ID: {}...)", group.name, &group_id[..8.min(group_id.len())]),
+                            format!("[组] {} (ID: {}...)", group.name, &group_id[..8.min(group_id.len())]),
                         );
                         if response.clicked() {
                             dialog.selected_group_id = Some(group_id.clone());
@@ -83,7 +83,7 @@ pub fn render_join_group_dialog(
             ui.add_space(8.0);
 
             if let Some(ref err) = dialog.error {
-                ui.colored_label(egui::Color32::RED, format!("❌ {}", err));
+                ui.colored_label(egui::Color32::RED, format!("[错误] {}", err));
                 ui.add_space(8.0);
             }
 

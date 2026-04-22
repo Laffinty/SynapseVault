@@ -57,7 +57,7 @@ fn test_rbac_permission_matrix_boundaries() {
     assert!(
         matches!(
             check_permission(&Role::AuditUser, &Action::ViewSecretPlaintext),
-            PermissionCheck::RequiresApproval { .. }
+            PermissionCheck::RequiresApproval
         ),
         "AuditUser 查看明文应需要审批"
     );

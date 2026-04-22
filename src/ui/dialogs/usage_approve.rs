@@ -35,7 +35,7 @@ pub fn render_usage_approve_dialog(
                                 ui.label(format!("时间: {}", req.timestamp.format("%Y-%m-%d %H:%M")));
 
                                 ui.horizontal(|ui| {
-                                    if ui.button("✓ 批准").clicked() {
+                                    if ui.button("批准").clicked() {
                                         approved = Some(req.request_id.clone());
                                     }
                                     // 拒绝仅关闭该请求的显示

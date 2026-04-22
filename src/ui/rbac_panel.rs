@@ -11,7 +11,7 @@ use egui::{Color32, Context, Ui};
 
 /// 渲染权限管理面板
 pub fn render_rbac_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) {
-    ui.heading("🛡️ 权限管理");
+    ui.heading("权限管理");
     ui.add_space(8.0);
 
     // 先判断当前用户是否为 Admin（在获取 group 可变引用之前）
@@ -36,13 +36,15 @@ pub fn render_rbac_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) 
 
         egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
             for member in &members {
-                render_member_row(
-                    ui,
-                    member,
-                    is_admin,
-                    has_pending_change,
-                    &mut role_changes,
-                );
+                ui.push_id(&member.member_id, |ui| {
+                    render_member_row(
+                        ui,
+                        member,
+                        is_admin,
+                        has_pending_change,
+                        &mut role_changes,
+                    );
+                });
             }
         });
     });
@@ -62,7 +64,7 @@ pub fn render_rbac_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) 
             let pending_count = app.pending_usage_requests.len();
             if pending_count > 0 {
                 ui.label(format!("待审批请求: {} 条", pending_count));
-                if ui.button("📋 查看待审批请求").clicked() {
+                if ui.button("查看待审批请求").clicked() {
                     app.show_usage_approve = true;
                 }
             } else {
@@ -76,7 +78,7 @@ pub fn render_rbac_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) 
         let mut confirmed = false;
         let mut cancelled = false;
 
-        egui::Window::new("⚠️ 确认角色变更")
+        egui::Window::new("确认角色变更")
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -96,10 +98,10 @@ pub fn render_rbac_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) 
                 ui.colored_label(Color32::YELLOW, "此操作将立即生效并同步到所有节点。");
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    if ui.button("❌ 取消").clicked() {
+                    if ui.button("取消").clicked() {
                         cancelled = true;
                     }
-                    if ui.button("✅ 确认变更").clicked() {
+                    if ui.button("确认变更").clicked() {
                         confirmed = true;
                     }
                 });
@@ -175,9 +177,9 @@ pub fn render_rbac_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) 
 
                         for (action, check) in permissions_for_role(&role) {
                             let (icon, color) = match check {
-                                PermissionCheck::Allowed => ("✅", Color32::GREEN),
-                                PermissionCheck::Denied(_) => ("❌", Color32::RED),
-                                PermissionCheck::RequiresApproval => ("⏳", Color32::YELLOW),
+                                PermissionCheck::Allowed => ("[允许]", Color32::GREEN),
+                                PermissionCheck::Denied(_) => ("[拒绝]", Color32::RED),
+                                PermissionCheck::RequiresApproval => ("[需审批]", Color32::YELLOW),
                             };
                             ui.label(
                                 egui::RichText::new(format!("{} {}", icon, action))
@@ -214,9 +216,9 @@ fn render_member_row(
     role_changes: &mut Vec<(String, Role)>,
 ) {
     let (status_icon, status_color) = match member.status {
-        MemberStatus::Active => ("🟢", Color32::GREEN),
-        MemberStatus::PendingApproval => ("⏳", Color32::YELLOW),
-        MemberStatus::Revoked => ("🔴", Color32::RED),
+        MemberStatus::Active => ("[在线]", Color32::GREEN),
+        MemberStatus::PendingApproval => ("[待审批]", Color32::YELLOW),
+        MemberStatus::Revoked => ("[已撤销]", Color32::RED),
     };
 
     let id_short = if member.member_id.len() > 12 {

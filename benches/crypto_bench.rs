@@ -10,7 +10,7 @@ fn bench_argon2id(c: &mut Criterion) {
 
     let params = synapse_vault::crypto::kdf::Argon2Params::default();
     let salt = [0u8; 32];
-    let password = b"benchmark_password_123";
+    let password = "benchmark_password_123";
 
     group.bench_function("default_params", |b| {
         b.iter(|| {
@@ -64,7 +64,7 @@ fn bench_ed25519(c: &mut Criterion) {
     let signature = synapse_vault::crypto::signing::sign(&sk, message);
     let vk = sk.verifying_key();
     group.bench_function("verify", |b| {
-        b.iter(|| synapse_vault::crypto::signing::verify_signature(black_box(&vk), black_box(message), black_box(&signature)))
+        b.iter(|| synapse_vault::crypto::signing::verify(black_box(&vk), black_box(message), black_box(&signature)))
     });
 
     group.finish();
@@ -86,7 +86,7 @@ fn bench_merkle(c: &mut Criterion) {
 }
 
 fn bench_block_hash(c: &mut Criterion) {
-    let (sk, vk) = generate_keypair();
+    let (_sk, vk) = generate_keypair();
     let genesis = Block::genesis("bench_group", vk);
 
     c.bench_function("block_compute_hash", |b| {
@@ -94,7 +94,7 @@ fn bench_block_hash(c: &mut Criterion) {
             let mut block = genesis.clone();
             block.height = 1;
             block.update_hash();
-            black_box(&block.block_hash)
+            black_box(block.block_hash)
         })
     });
 }

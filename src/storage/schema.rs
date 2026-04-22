@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use crate::storage::database::StorageError;
 
 /// 当前 Schema 版本
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// 初始化数据库 Schema（首次运行）
 pub fn init_schema(conn: &Connection) -> Result<(), StorageError> {
@@ -119,7 +119,8 @@ pub fn init_schema(conn: &Connection) -> Result<(), StorageError> {
             device_fingerprint  TEXT NOT NULL,
             peer_id             TEXT NOT NULL,
             client_ip           TEXT,
-            timestamp           TEXT NOT NULL
+            timestamp           TEXT NOT NULL,
+            signature           BLOB NOT NULL DEFAULT X''
         );",
         [],
     )?;
@@ -178,6 +179,13 @@ pub fn migrate(conn: &Connection, target_version: u32) -> Result<(), StorageErro
     // 目前只有版本 1，后续迁移在这里添加
     if current_version < 1 && target_version >= 1 {
         init_schema(conn)?;
+    }
+    if current_version < 2 && target_version >= 2 {
+        // 为 audit_index 添加 signature 列（如果不存在）
+        let _ = conn.execute(
+            "ALTER TABLE audit_index ADD COLUMN signature BLOB NOT NULL DEFAULT X''",
+            [],
+        );
     }
 
     conn.execute(

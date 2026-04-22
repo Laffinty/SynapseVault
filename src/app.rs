@@ -12,6 +12,7 @@ use crate::ui::dialogs::approve_member::{
     render_approve_member_dialog, ApproveMemberDialog, ApproveMemberResult,
 };
 use crate::ui::dialogs::create_group::{render_create_group_dialog, CreateGroupDialog, CreateGroupResult};
+use crate::ui::dialogs::create_secret::{render_create_secret_dialog, CreateSecretDialog, CreateSecretResult};
 use crate::ui::dialogs::join_group::{render_join_group_dialog, JoinGroupDialog, JoinGroupResult};
 use crate::ui::dialogs::audit_detail::{render_audit_detail_dialog, AuditDetailDialog};
 use crate::ui::dialogs::view_secret::{render_view_secret_dialog, ViewSecretDialog};
@@ -51,6 +52,10 @@ pub enum DialogState {
     CopySecret { secret_id: String },
     /// 申请查看密码（AuditUser）
     RequestUsage { secret_id: String },
+    /// 创建新密码
+    CreateSecret,
+    /// 编辑密码
+    EditSecret { secret_id: String },
 }
 
 /// 解锁状态
@@ -112,6 +117,8 @@ pub struct SynapseVaultApp {
     // 组管理弹窗状态
     pub create_group_dialog: Option<CreateGroupDialog>,
     pub join_group_dialog: Option<JoinGroupDialog>,
+    /// 创建/编辑密码弹窗
+    pub create_secret_dialog: Option<CreateSecretDialog>,
 
     // ===== Phase 4: RBAC 审批弹窗状态 =====
     pub approve_member_dialog: Option<ApproveMemberDialog>,
@@ -186,6 +193,7 @@ impl Default for SynapseVaultApp {
             pending_join_requests: Vec::new(),
             create_group_dialog: None,
             join_group_dialog: None,
+            create_secret_dialog: None,
             approve_member_dialog: None,
             received_join_requests: Vec::new(),
             pending_requests_cache: Vec::new(),
@@ -298,6 +306,7 @@ impl SynapseVaultApp {
                 };
                 if let Some(path) = picked {
                     self.key_file_path = path.to_string_lossy().to_string();
+                    self.update_first_setup();
                 }
             }
         }
@@ -351,6 +360,14 @@ impl SynapseVaultApp {
                     return;
                 }
             };
+
+            if let Some(parent) = std::path::Path::new(&key_file_path).parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    let mut guard = result_arc.lock().expect("unlock result mutex poisoned");
+                    *guard = Some(Err(format!("创建目录失败: {}", e)));
+                    return;
+                }
+            }
 
             if let Err(e) = std::fs::write(&key_file_path, &encoded) {
                 let mut guard = result_arc.lock().expect("unlock result mutex poisoned");
@@ -416,6 +433,21 @@ impl SynapseVaultApp {
             let mut guard = result_arc.lock().expect("unlock result mutex poisoned");
             *guard = Some(result.map_err(|e| e.to_string()));
         });
+    }
+
+    /// 刷新密码列表（从数据库重新加载）
+    fn refresh_secret_metas(&mut self) {
+        if let (Some(ref conn), Some(ref group)) = (&self.db_conn, &self.current_group) {
+            let store = SecretStore::new(conn);
+            match store.list_secrets(Some(&group.group_id)) {
+                Ok(metas) => {
+                    self.secret_metas.insert(group.group_id.clone(), metas);
+                }
+                Err(e) => {
+                    tracing::warn!("刷新密码列表失败: {}", e);
+                }
+            }
+        }
     }
 
     /// 打开数据库并加载密码列表
@@ -489,7 +521,7 @@ impl SynapseVaultApp {
     /// Phase 5: 记录查看密码审计日志
     fn log_audit_view_secret(&self, secret_id: &str) {
         if let (Some(ref session), Some(ref conn)) = (&self.session, &self.db_conn) {
-            let event = crate::audit::event::AuditEvent::new(
+            let mut event = crate::audit::event::AuditEvent::new(
                 format!("view_{}", uuid::Uuid::new_v4()),
                 crate::audit::event::OperationType::ViewSecret,
                 hex::encode(session.public_key.as_bytes()),
@@ -497,6 +529,7 @@ impl SynapseVaultApp {
                 "local".to_string(),
             )
             .with_secret_id(secret_id.to_string());
+            event.sign(&session.private_key);
             let _ = crate::audit::logger::log_event(conn, &event, None);
         }
     }
@@ -504,7 +537,7 @@ impl SynapseVaultApp {
     /// Phase 5: 记录复制密码审计日志
     fn log_audit_copy_secret(&self, secret_id: &str) {
         if let (Some(ref session), Some(ref conn)) = (&self.session, &self.db_conn) {
-            let event = crate::audit::event::AuditEvent::new(
+            let mut event = crate::audit::event::AuditEvent::new(
                 format!("copy_{}", uuid::Uuid::new_v4()),
                 crate::audit::event::OperationType::CopySecret,
                 hex::encode(session.public_key.as_bytes()),
@@ -512,6 +545,7 @@ impl SynapseVaultApp {
                 "local".to_string(),
             )
             .with_secret_id(secret_id.to_string());
+            event.sign(&session.private_key);
             let _ = crate::audit::logger::log_event(conn, &event, None);
         }
     }
@@ -554,7 +588,7 @@ impl SynapseVaultApp {
         }
 
         for brief in events {
-            let event = crate::audit::event::AuditEvent::new(
+            let mut event = crate::audit::event::AuditEvent::new(
                 brief.event_id.clone(),
                 crate::audit::logger::parse_operation_type(&brief.operation_type),
                 brief.actor_member_id.clone(),
@@ -562,6 +596,7 @@ impl SynapseVaultApp {
                 String::new(), // peer_id not in brief
             )
             .with_secret_id(brief.target_secret_id.clone().unwrap_or_default());
+            event.signature = brief.signature.clone();
 
             match crate::audit::logger::sync_event(conn, &event, None) {
                 Ok(true) => tracing::debug!("同步审计事件: {}", brief.event_id),
@@ -609,6 +644,11 @@ impl SynapseVaultApp {
         self.pending_requests_cache = result;
     }
 
+    /// 根据当前 key_file_path 更新 is_first_setup 状态
+    fn update_first_setup(&mut self) {
+        self.is_first_setup = !Path::new(&self.key_file_path).exists();
+    }
+
     /// 锁定应用
     pub(crate) fn lock_app(&mut self) {
         self.unlock_state = UnlockState::Locked;
@@ -625,6 +665,7 @@ impl SynapseVaultApp {
         self.pending_join_requests.clear();
         self.create_group_dialog = None;
         self.join_group_dialog = None;
+        self.create_secret_dialog = None;
         self.approve_member_dialog = None;
         self.received_join_requests.clear();
         self.pending_requests_cache.clear();
@@ -649,6 +690,9 @@ impl eframe::App for SynapseVaultApp {
         self.try_produce_block();
 
         // 2. 根据解锁状态渲染界面
+        if self.unlock_state == UnlockState::Locked {
+            self.update_first_setup();
+        }
         match self.unlock_state {
             UnlockState::Locked | UnlockState::Unlocking => {
                 let mode = if self.is_first_setup {
@@ -830,6 +874,31 @@ impl eframe::App for SynapseVaultApp {
                     );
                     close = true; // 清除 active_dialog，弹窗由 usage_request_dialog 管理
                 }
+                DialogState::CreateSecret => {
+                    self.create_secret_dialog = Some(CreateSecretDialog::new());
+                    close = true;
+                }
+                DialogState::EditSecret { secret_id } => {
+                    if let Some(ref conn) = self.db_conn {
+                        match SecretStore::new(conn).get_secret(secret_id) {
+                            Ok(entry) => {
+                                self.create_secret_dialog = Some(CreateSecretDialog::for_edit(
+                                    &entry.secret_id,
+                                    &entry.title,
+                                    &entry.username,
+                                    &entry.environment,
+                                    &entry.tags,
+                                    &entry.description,
+                                    entry.expires_at,
+                                ));
+                            }
+                            Err(e) => {
+                                tracing::warn!("加载密码条目失败: {}", e);
+                            }
+                        }
+                    }
+                    close = true;
+                }
             }
             if close {
                 self.active_dialog = None;
@@ -947,6 +1016,82 @@ impl eframe::App for SynapseVaultApp {
             }
         }
 
+        // 5.5 渲染创建/编辑密码弹窗
+        if let Some(mut dialog) = self.create_secret_dialog.take() {
+            match render_create_secret_dialog(&ctx, &mut dialog) {
+                Some(CreateSecretResult::Submit {
+                    secret_id,
+                    title,
+                    username,
+                    password,
+                    environment,
+                    tags,
+                    description,
+                    expires_at,
+                }) => {
+                    if let (Some(ref conn), Some(ref session), Some(ref group)) =
+                        (&self.db_conn, &self.session, &self.current_group)
+                    {
+                        let store = SecretStore::new(conn);
+                        if let Some(sid) = secret_id {
+                            // 编辑模式
+                            let new_pw = if password.is_empty() { None } else { Some(password.as_str()) };
+                            match store.update_secret(
+                                &sid,
+                                new_pw,
+                                Some(&title),
+                                Some(&username),
+                                Some(&environment),
+                                Some(tags),
+                                Some(&description),
+                                Some(expires_at),
+                                &session.master_key,
+                            ) {
+                                Ok(_) => {
+                                    tracing::info!("密码已更新: {}", sid);
+                                    self.refresh_secret_metas();
+                                }
+                                Err(e) => {
+                                    tracing::warn!("更新密码失败: {}", e);
+                                    dialog.error = Some(e.to_string());
+                                    self.create_secret_dialog = Some(dialog);
+                                }
+                            }
+                        } else {
+                            // 新建模式
+                            let created_by = hex::encode(session.public_key.as_bytes());
+                            match store.create_secret(
+                                &group.group_id,
+                                &title,
+                                &username,
+                                &password,
+                                &environment,
+                                tags,
+                                &description,
+                                expires_at,
+                                &created_by,
+                                &session.master_key,
+                            ) {
+                                Ok(_) => {
+                                    tracing::info!("新密码已创建: {}", title);
+                                    self.refresh_secret_metas();
+                                }
+                                Err(e) => {
+                                    tracing::warn!("创建密码失败: {}", e);
+                                    dialog.error = Some(e.to_string());
+                                    self.create_secret_dialog = Some(dialog);
+                                }
+                            }
+                        }
+                    }
+                }
+                Some(CreateSecretResult::Cancelled) => {}
+                None => {
+                    self.create_secret_dialog = Some(dialog);
+                }
+            }
+        }
+
         // 6. 渲染加入组弹窗
         if let Some(mut dialog) = self.join_group_dialog.take() {
             if let Some(ref session) = self.session {
@@ -989,7 +1134,10 @@ impl eframe::App for SynapseVaultApp {
                                 tracing::info!("已拒绝成员加入: {}", requester_id);
                                 self.pending_requests_cache.clear();
                             }
-                            Some(ApproveMemberResult::Closed) | None => {
+                            Some(ApproveMemberResult::Closed) => {
+                                self.approve_member_dialog = None;
+                            }
+                            None => {
                                 self.approve_member_dialog = Some(dialog);
                             }
                         }

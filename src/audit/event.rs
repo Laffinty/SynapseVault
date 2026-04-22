@@ -3,6 +3,7 @@
 //! 定义所有可审计的操作事件类型。
 
 use chrono::{DateTime, Utc};
+use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -94,6 +95,8 @@ pub struct AuditEvent {
     /// 事件哈希（签名前计算）
     #[serde(skip)]
     pub event_hash: [u8; 32],
+    /// ed25519 签名（对 event_hash 的签名）
+    pub signature: Vec<u8>,
 }
 
 impl AuditEvent {
@@ -116,6 +119,7 @@ impl AuditEvent {
             timestamp: Utc::now(),
             summary: String::new(),
             event_hash: [0u8; 32],
+            signature: Vec::new(),
         };
         event.update_hash();
         event
@@ -169,6 +173,25 @@ impl AuditEvent {
     /// 验证哈希
     pub fn verify_hash(&self) -> bool {
         self.event_hash == self.compute_hash()
+    }
+
+    /// 使用 ed25519 私钥对事件哈希签名
+    pub fn sign(&mut self, signing_key: &SigningKey) {
+        self.update_hash();
+        self.signature = signing_key.sign(&self.event_hash).to_bytes().to_vec();
+    }
+
+    /// 验证签名
+    pub fn verify_signature(&self, verifying_key: &ed25519_dalek::VerifyingKey) -> bool {
+        if self.signature.len() != 64 {
+            return false;
+        }
+        let sig_bytes: [u8; 64] = match self.signature.as_slice().try_into() {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        let signature = ed25519_dalek::Signature::from_bytes(&sig_bytes);
+        verifying_key.verify_strict(&self.event_hash, &signature).is_ok()
     }
 }
 

@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_is_validator() {
-        let (admin_sk, admin_vk) = generate_keypair();
+        let (_admin_sk, admin_vk) = generate_keypair();
         let (_other_sk, other_vk) = generate_keypair();
 
         assert!(is_validator("g1", &admin_vk, &[admin_vk]));
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_non_validator_cannot_create_block() {
-        let (admin_sk, admin_vk) = generate_keypair();
+        let (_admin_sk, admin_vk) = generate_keypair();
         let (user_sk, _user_vk) = generate_keypair();
         let genesis = Block::genesis("g1", admin_vk);
 

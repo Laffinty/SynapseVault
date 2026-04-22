@@ -71,7 +71,7 @@ pub fn render_view_secret_dialog(
             ui.horizontal(|ui| {
                 ui.label("用户名:");
                 ui.strong(&dialog.username);
-                if ui.button("📋 复制用户名").clicked() {
+                if ui.button("复制用户名").clicked() {
                     on_copy(&dialog.username);
                     dialog.copied = true;
                     dialog.copy_timer = 2.0;
@@ -97,9 +97,9 @@ pub fn render_view_secret_dialog(
 
                     if ui
                         .button(if dialog.show_password {
-                            "🙈 隐藏"
+                            "隐藏"
                         } else {
-                            "👁 显示"
+                            "显示"
                         })
                         .clicked()
                     {
@@ -108,13 +108,13 @@ pub fn render_view_secret_dialog(
                 });
 
                 ui.horizontal(|ui| {
-                    if ui.button("📋 复制密码").clicked() {
+                    if ui.button("复制密码").clicked() {
                         on_copy(&dialog.password_plaintext);
                         dialog.copied = true;
                         dialog.copy_timer = 2.0;
                     }
                     if dialog.copied {
-                        ui.colored_label(Color32::GREEN, "✓ 已复制");
+                        ui.colored_label(Color32::GREEN, "已复制");
                     }
                 });
             });
@@ -130,7 +130,7 @@ pub fn render_view_secret_dialog(
                     ui.label("标签:");
                     for tag in &dialog.tags {
                         ui.label(
-                            egui::RichText::new(format!("🏷 {}", tag))
+                            egui::RichText::new(format!("[标签] {}", tag))
                                 .background_color(ui.visuals().widgets.inactive.bg_fill),
                         );
                     }

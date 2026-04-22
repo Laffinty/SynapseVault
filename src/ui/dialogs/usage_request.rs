@@ -52,7 +52,7 @@ pub fn render_usage_request_dialog(
             }
 
             if dialog.submitted {
-                ui.colored_label(egui::Color32::GREEN, "✓ 申请已提交，等待 Admin 审批");
+                ui.colored_label(egui::Color32::GREEN, "申请已提交，等待 Admin 审批");
             }
 
             ui.add_space(8.0);

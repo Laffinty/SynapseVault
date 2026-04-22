@@ -37,9 +37,9 @@ pub fn build_behaviour(
         .max_transmit_size(1_048_576)        // 1 MB，支持较大区块批次
         .heartbeat_interval(Duration::from_secs(5)) // 5s，小型网络更快收敛
         .validation_mode(gossipsub::ValidationMode::Strict)
-        .mesh_n_high(4)                      // 小团队降低 mesh 上限
-        .mesh_n_low(2)                       // 小团队降低 mesh 下限
-        .mesh_outbound_min(1)                // 最少 1 个出站
+        .mesh_n_high(6)
+        .mesh_n_low(4)
+        .mesh_outbound_min(2)
         .fanout_ttl(Duration::from_secs(30))
         .history_length(10)                  // 消息去重窗口
         .build()

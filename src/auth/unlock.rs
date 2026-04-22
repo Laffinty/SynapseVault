@@ -9,6 +9,7 @@ use crate::crypto::kdf::{derive_keyfile_key, derive_master_key, Argon2Params};
 use crate::crypto::symmetric::decrypt;
 use chrono::{DateTime, Utc};
 use ed25519_dalek::SigningKey;
+use rand::Rng;
 use zeroize::Zeroize;
 
 /// 解锁后会话（敏感数据在 Drop 时自动擦除）
@@ -29,12 +30,15 @@ pub struct UnlockedSession {
 
 impl Zeroize for UnlockedSession {
     fn zeroize(&mut self) {
-        // SigningKey 可以通过覆盖为零字节来擦除
-        self.private_key = SigningKey::from_bytes(&[0u8; 32]);
+        // ed25519-dalek 的 SigningKey 在 Drop 时会自动 zeroize secret_key，
+        // 但为了降低旧内存被识别的风险，这里用随机字节覆盖后再由 Drop 处理。
+        let mut rnd = [0u8; 32];
+        rand::thread_rng().fill(&mut rnd);
+        self.private_key = SigningKey::from_bytes(&rnd);
+        rnd.zeroize();
         self.master_key.zeroize();
         self.device_fingerprint.zeroize();
     }
-
 }
 
 impl Drop for UnlockedSession {

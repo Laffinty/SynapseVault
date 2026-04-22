@@ -216,37 +216,55 @@ impl Blockchain {
     /// 解决分叉：最长链胜出，等长时用累计哈希决胜
     ///
     /// 如果远程链更长或等长但累计哈希更大，替换本地链。
-    /// 返回 true 表示本地链被替换。
-    pub fn resolve_fork(&mut self, remote: &Blockchain) -> bool {
+    /// 返回 `(replaced, orphaned_ops)`：replaced=true 表示本地链被替换；
+    /// orphaned_ops 为被替换的本地分支上的操作，应重新入队到待打包队列。
+    pub fn resolve_fork(&mut self, remote: &Blockchain) -> (bool, Vec<BlockchainOp>) {
         if remote.group_id != self.group_id {
-            return false;
+            return (false, Vec::new());
         }
         // 验证远程链
         if remote.validate_chain().is_err() {
-            return false;
+            return (false, Vec::new());
         }
 
         let local_len = self.blocks.len();
         let remote_len = remote.blocks.len();
 
-        if remote_len > local_len {
-            self.blocks = remote.blocks.clone();
-            self.validators = remote.validators.clone();
-            return true;
-        }
-
-        if remote_len == local_len {
+        let should_replace = if remote_len > local_len {
+            true
+        } else if remote_len == local_len {
             // 等长：用最后一个区块哈希作为决胜条件
             let local_tip = self.blocks.last().map(|b| b.block_hash).unwrap_or([0u8; 32]);
             let remote_tip = remote.blocks.last().map(|b| b.block_hash).unwrap_or([0u8; 32]);
-            if remote_tip > local_tip {
-                self.blocks = remote.blocks.clone();
-                self.validators = remote.validators.clone();
-                return true;
-            }
-        }
+            remote_tip > local_tip
+        } else {
+            false
+        };
 
-        false
+        if should_replace {
+            // 找到分叉点，提取本地独有操作
+            let mut fork_point = 0usize;
+            let common_len = local_len.min(remote_len);
+            for i in 0..common_len {
+                if self.blocks[i].block_hash == remote.blocks[i].block_hash {
+                    fork_point = i + 1;
+                } else {
+                    break;
+                }
+            }
+            let mut orphaned_ops = Vec::new();
+            for i in fork_point..local_len {
+                if let Ok(ops) = bincode::deserialize::<Vec<BlockchainOp>>(&self.blocks[i].ops_data) {
+                    orphaned_ops.extend(ops);
+                }
+            }
+
+            self.blocks = remote.blocks.clone();
+            self.validators = remote.validators.clone();
+            (true, orphaned_ops)
+        } else {
+            (false, Vec::new())
+        }
     }
 }
 
@@ -355,7 +373,7 @@ mod tests {
 
     #[test]
     fn test_append_invalid_signature_fails() {
-        let (admin_sk, admin_vk) = generate_keypair();
+        let (_admin_sk, admin_vk) = generate_keypair();
         let (other_sk, other_vk) = generate_keypair();
         let mut chain = Blockchain::new("g1", admin_vk, vec![admin_vk]);
 
@@ -479,9 +497,9 @@ mod tests {
 
     #[test]
     fn test_block_producer_empty_ops_no_block() {
-        let (admin_sk, admin_vk) = generate_keypair();
-        let chain = Blockchain::new("g1", admin_vk, vec![admin_vk]);
-        let mut producer = BlockProducer::new("g1");
+        let (_admin_sk, admin_vk) = generate_keypair();
+        let _chain = Blockchain::new("g1", admin_vk, vec![admin_vk]);
+        let producer = BlockProducer::new("g1");
         assert!(!producer.should_produce_block());
     }
 
@@ -495,17 +513,16 @@ mod tests {
         let block = create_block("g1", local.latest_block().unwrap(), &ops, &admin_sk, &[admin_vk]).unwrap();
         local.append_block(block).unwrap();
 
-        // 远程链：2 个区块（更长）
-        let mut remote = Blockchain::new("g1", admin_vk, vec![admin_vk]);
-        let ops1 = vec![BlockchainOp::AuditAnchor { event_id: "e1".to_string(), event_hash: [1u8; 32] }];
-        let block1 = create_block("g1", remote.latest_block().unwrap(), &ops1, &admin_sk, &[admin_vk]).unwrap();
-        remote.append_block(block1).unwrap();
+        // 远程链：基于本地链再扩展 1 个区块（更长）
+        let mut remote = local.clone();
         let ops2 = vec![BlockchainOp::AuditAnchor { event_id: "e2".to_string(), event_hash: [2u8; 32] }];
         let block2 = create_block("g1", remote.latest_block().unwrap(), &ops2, &admin_sk, &[admin_vk]).unwrap();
         remote.append_block(block2).unwrap();
 
-        assert!(local.resolve_fork(&remote));
+        let (replaced, orphaned) = local.resolve_fork(&remote);
+        assert!(replaced);
         assert_eq!(local.height(), 2);
+        assert!(orphaned.is_empty()); // 本地链的所有区块都在远程链中，无孤儿操作
     }
 
     #[test]
@@ -521,15 +538,18 @@ mod tests {
         // 远程链：1 个区块（更短）
         let remote = Blockchain::new("g1", admin_vk, vec![admin_vk]);
 
-        assert!(!local.resolve_fork(&remote));
+        let (replaced, orphaned) = local.resolve_fork(&remote);
+        assert!(!replaced);
         assert_eq!(local.height(), 1);
+        assert!(orphaned.is_empty());
     }
 
     #[test]
     fn test_resolve_fork_different_group_ignored() {
-        let (admin_sk, admin_vk) = generate_keypair();
+        let (_admin_sk, admin_vk) = generate_keypair();
         let mut local = Blockchain::new("g1", admin_vk, vec![admin_vk]);
         let remote = Blockchain::new("g2", admin_vk, vec![admin_vk]);
-        assert!(!local.resolve_fork(&remote));
+        let (replaced, _orphaned) = local.resolve_fork(&remote);
+        assert!(!replaced);
     }
 }

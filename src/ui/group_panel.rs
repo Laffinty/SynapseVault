@@ -7,14 +7,14 @@ use egui::{Color32, Context, Ui};
 
 /// 渲染组管理面板
 pub fn render_group_panel(app: &mut SynapseVaultApp, _ctx: &Context, ui: &mut Ui) {
-    ui.heading("📁 组管理");
+    ui.heading("组管理");
     ui.add_space(8.0);
 
     if let Some(ref group) = app.current_group {
         // ===== 当前已加入组的信息 =====
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("📁 当前组").size(18.0).strong());
+                ui.label(egui::RichText::new("当前组").size(18.0).strong());
                 ui.label(
                     egui::RichText::new("(Admin)")
                         .color(Color32::from_rgb(100, 200, 100))
@@ -56,7 +56,7 @@ pub fn render_group_panel(app: &mut SynapseVaultApp, _ctx: &Context, ui: &mut Ui
             ui.horizontal(|ui| {
                 ui.label("需审批加入:");
                 ui.label(if group.config.require_approval {
-                    "是 ✅"
+                    "是"
                 } else {
                     "否"
                 });
@@ -68,26 +68,28 @@ pub fn render_group_panel(app: &mut SynapseVaultApp, _ctx: &Context, ui: &mut Ui
             egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
                 for member in group.member_map.values() {
                     let (icon, color) = match member.status {
-                        crate::group::member::MemberStatus::Active => ("🟢", Color32::GREEN),
+                        crate::group::member::MemberStatus::Active => ("[在线]", Color32::GREEN),
                         crate::group::member::MemberStatus::PendingApproval => {
-                            ("⏳", Color32::YELLOW)
+                            ("[待审批]", Color32::YELLOW)
                         }
-                        crate::group::member::MemberStatus::Revoked => ("🔴", Color32::RED),
+                        crate::group::member::MemberStatus::Revoked => ("[已撤销]", Color32::RED),
                     };
-                    ui.horizontal(|ui| {
-                        ui.label(format!("{} ", icon));
-                        let id_short = if member.member_id.len() > 12 {
-                            format!("{}...", &member.member_id[..12])
-                        } else {
-                            member.member_id.clone()
-                        };
-                        ui.monospace(id_short);
-                        ui.label(format!("({:?})", member.role));
-                        ui.label(
-                            egui::RichText::new(format!("{:?}", member.status))
-                                .color(color)
-                                .size(12.0),
-                        );
+                    ui.push_id(&member.member_id, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{} ", icon));
+                            let id_short = if member.member_id.len() > 12 {
+                                format!("{}...", &member.member_id[..12])
+                            } else {
+                                member.member_id.clone()
+                            };
+                            ui.monospace(id_short);
+                            ui.label(format!("({:?})", member.role));
+                            ui.label(
+                                egui::RichText::new(format!("{:?}", member.status))
+                                    .color(color)
+                                    .size(12.0),
+                            );
+                        });
                     });
                 }
             });
@@ -105,9 +107,9 @@ pub fn render_group_panel(app: &mut SynapseVaultApp, _ctx: &Context, ui: &mut Ui
                 .filter(|m| m.status == crate::group::member::MemberStatus::PendingApproval)
                 .count();
             let btn_text = if pending_count > 0 {
-                format!("⏳ 审批加入请求 ({})", pending_count)
+                format!("审批加入请求 ({})", pending_count)
             } else {
-                "⏳ 审批加入请求".to_string()
+                "审批加入请求".to_string()
             };
             if ui.button(btn_text).clicked() {
                 app.approve_member_dialog =
@@ -116,7 +118,7 @@ pub fn render_group_panel(app: &mut SynapseVaultApp, _ctx: &Context, ui: &mut Ui
             ui.add_space(8.0);
         }
 
-        if ui.button("🚪 离开当前组").clicked() {
+        if ui.button("离开当前组").clicked() {
             app.current_group = None;
             app.group_signing_key = None;
         }
@@ -131,11 +133,11 @@ pub fn render_group_panel(app: &mut SynapseVaultApp, _ctx: &Context, ui: &mut Ui
             ui.label(egui::RichText::new("操作").strong());
             ui.add_space(8.0);
 
-            if ui.button("➕ 创建新组").clicked() {
+            if ui.button("创建新组").clicked() {
                 app.create_group_dialog = Some(crate::ui::dialogs::create_group::CreateGroupDialog::new());
             }
             ui.add_space(4.0);
-            if ui.button("🔍 发现组").clicked() {
+            if ui.button("发现组").clicked() {
                 app.join_group_dialog = Some(crate::ui::dialogs::join_group::JoinGroupDialog::new());
             }
         });
@@ -149,7 +151,7 @@ pub fn render_group_panel(app: &mut SynapseVaultApp, _ctx: &Context, ui: &mut Ui
                 ui.add_space(4.0);
                 for (gid, dg) in &app.discovery_state.discovered_groups {
                     ui.horizontal(|ui| {
-                        ui.label("📁");
+                        ui.label("[组]");
                         ui.label(format!("{} ({})", dg.name, &gid[..8.min(gid.len())]));
                     });
                 }

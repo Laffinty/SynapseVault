@@ -43,10 +43,10 @@ impl DiscoveryState {
             mdns::Event::Discovered(peers) => {
                 for (peer, addr) in peers {
                     // 保存 peer 地址
-                    self.peer_addresses
-                        .entry(*peer)
-                        .or_default()
-                        .push(addr.clone());
+                    let addrs = self.peer_addresses.entry(*peer).or_default();
+                    if !addrs.contains(addr) {
+                        addrs.push(addr.clone());
+                    }
 
                     tracing::info!("mDNS discovered peer: {} at {}", peer, addr);
 
@@ -63,8 +63,14 @@ impl DiscoveryState {
                 for (peer, _addr) in peers {
                     self.peer_addresses.remove(peer);
                     if let Some(group_id) = self.peer_to_group.remove(peer) {
-                        self.discovered_groups.remove(&group_id);
-                        tracing::info!("mDNS peer expired: {} -> group {}", peer, group_id);
+                        // 只有该 group 没有其他已知 peer 时才移除
+                        let has_other_peers = self.peer_to_group.values().any(|g| g == &group_id);
+                        if !has_other_peers {
+                            self.discovered_groups.remove(&group_id);
+                            tracing::info!("mDNS peer expired: {} -> group {} removed", peer, group_id);
+                        } else {
+                            tracing::info!("mDNS peer expired: {} -> group {} still has other peers", peer, group_id);
+                        }
                     }
                 }
             }
@@ -196,5 +202,79 @@ mod tests {
         let addrs = state.peer_addrs_for_group(&"g1".to_string());
         assert_eq!(addrs.len(), 1);
         assert_eq!(addrs[0].1, vec![addr]);
+    }
+
+    #[test]
+    fn test_mdns_addr_deduplication() {
+        let mut state = DiscoveryState::new();
+        let peer = PeerId::from_bytes(&[
+            0, 36, 8, 1, 18, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])
+        .unwrap();
+        let addr: Multiaddr = "/ip4/127.0.0.1/tcp/42424".parse().unwrap();
+
+        // 同一 peer 同一地址重复发现不应累积
+        let event = mdns::Event::Discovered(vec![(peer, addr.clone())]);
+        state.on_mdns_discovered(&event);
+        state.on_mdns_discovered(&event);
+        state.on_mdns_discovered(&event);
+
+        assert_eq!(state.peer_addresses.get(&peer).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_mdns_expire_keeps_group_with_other_peers() {
+        let mut state = DiscoveryState::new();
+        let peer1 = PeerId::from_bytes(&[
+            0, 36, 8, 1, 18, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ])
+        .unwrap();
+        // peer2: 最后一个字节不同以生成不同 PeerId
+        let peer2 = PeerId::from_bytes(&[
+            0, 36, 8, 1, 18, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ])
+        .unwrap();
+
+        let addr1: Multiaddr = "/ip4/127.0.0.1/tcp/42424".parse().unwrap();
+        let addr2: Multiaddr = "/ip4/192.168.1.2/tcp/42424".parse().unwrap();
+
+        // 注册同一个 group 的两个不同 peer
+        let dg1 = DiscoveredGroup {
+            group_id: "group-a".to_string(),
+            name: "Group A".to_string(),
+            admin_pubkey_hash: "abc".to_string(),
+            port: 42424,
+            peer_id: peer1.to_string(),
+            discovered_at: Utc::now(),
+        };
+        let dg2 = DiscoveredGroup {
+            group_id: "group-a".to_string(),
+            name: "Group A".to_string(),
+            admin_pubkey_hash: "abc".to_string(),
+            port: 42424,
+            peer_id: peer2.to_string(),
+            discovered_at: Utc::now(),
+        };
+        state.register_discovered_group(dg1);
+        state.register_discovered_group(dg2);
+        // 填充 mDNS 地址
+        state.on_mdns_discovered(&mdns::Event::Discovered(vec![(peer1, addr1.clone())]));
+        state.on_mdns_discovered(&mdns::Event::Discovered(vec![(peer2, addr2.clone())]));
+
+        assert!(state.discovered_groups.contains_key("group-a"));
+        assert_eq!(state.peer_to_group.len(), 2);
+
+        // peer1 过期，group 应仍然保留（因为 peer2 还在）
+        state.on_mdns_discovered(&mdns::Event::Expired(vec![(peer1, addr1)]));
+        assert!(state.discovered_groups.contains_key("group-a"));
+        assert!(!state.peer_to_group.contains_key(&peer1));
+        assert!(state.peer_to_group.contains_key(&peer2));
+
+        // peer2 也过期，group 应被移除
+        state.on_mdns_discovered(&mdns::Event::Expired(vec![(peer2, addr2)]));
+        assert!(!state.discovered_groups.contains_key("group-a"));
     }
 }

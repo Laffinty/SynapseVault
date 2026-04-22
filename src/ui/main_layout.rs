@@ -37,7 +37,7 @@ pub fn render_main_layout(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui)
 
 /// 渲染设置面板
 fn render_settings_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) {
-    ui.heading("⚙️ 设置");
+    ui.heading("设置");
     ui.add_space(8.0);
 
     // 使用审批 TTL

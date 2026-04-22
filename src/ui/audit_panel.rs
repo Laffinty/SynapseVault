@@ -23,7 +23,7 @@ pub struct AuditPanelState {
 
 /// 渲染审计面板
 pub fn render_audit_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) {
-    ui.heading("📋 审计日志");
+    ui.heading("审计日志");
     ui.add_space(8.0);
 
     let filter_type = app.audit_panel_state.filter_type;
@@ -64,16 +64,16 @@ pub fn render_audit_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui)
 
         ui.separator();
 
-        if ui.button("🔄 刷新").clicked() {
+        if ui.button("刷新").clicked() {
             app.audit_panel_state.last_refresh = Some(Utc::now());
         }
 
-        if ui.button("📤 导出 JSON").clicked() {
+        if ui.button("导出 JSON").clicked() {
             app.audit_panel_state.show_export_dialog = true;
             app.audit_panel_state.export_format = ExportFormat::Json;
         }
 
-        if ui.button("📤 导出 CSV").clicked() {
+        if ui.button("导出 CSV").clicked() {
             app.audit_panel_state.show_export_dialog = true;
             app.audit_panel_state.export_format = ExportFormat::Csv;
         }
@@ -171,7 +171,7 @@ fn handle_audit_export(
                             Ok(mut file) => {
                                 match export_events(conn, &query, format, &mut file) {
                                     Ok(count) => {
-                                        ui.label(format!("✅ 成功导出 {} 条记录", count));
+                                        ui.label(format!("成功导出 {} 条记录", count));
                                     }
                                     Err(e) => {
                                         ui.colored_label(

@@ -65,52 +65,54 @@ pub fn render_approve_member_dialog(
                             requester_id.clone()
                         };
 
-                        ui.group(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("👤");
-                                ui.monospace(&id_short);
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("设备指纹:");
-                                ui.label(&request.device_fingerprint);
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("申请时间:");
-                                ui.label(request.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string());
-                            });
+                        ui.push_id(&requester_id, |ui| {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("[用户]");
+                                    ui.monospace(&id_short);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("设备指纹:");
+                                    ui.label(&request.device_fingerprint);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("申请时间:");
+                                    ui.label(request.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string());
+                                });
 
-                            ui.add_space(4.0);
-                            ui.horizontal(|ui| {
-                                if ui.button("✅ 批准").clicked() {
-                                    match approve_join(group, request, admin_signing_key) {
-                                        Ok(_approval) => {
-                                            result = Some(ApproveMemberResult::Approved {
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    if ui.button("批准").clicked() {
+                                        match approve_join(group, request, admin_signing_key) {
+                                            Ok(_approval) => {
+                                                result = Some(ApproveMemberResult::Approved {
+                                                    requester_id: requester_id.clone(),
+                                                });
+                                            }
+                                            Err(e) => {
+                                                ui.colored_label(
+                                                    egui::Color32::RED,
+                                                    format!("批准失败: {}", e),
+                                                );
+                                            }
+                                        }
+                                    }
+                                    if ui.button("拒绝").clicked() {
+                                        if let Err(e) = reject_join(group, request, admin_signing_key) {
+                                            ui.colored_label(
+                                                egui::Color32::RED,
+                                                format!("拒绝失败: {}", e),
+                                            );
+                                        } else {
+                                            result = Some(ApproveMemberResult::Rejected {
                                                 requester_id: requester_id.clone(),
                                             });
                                         }
-                                        Err(e) => {
-                                            ui.colored_label(
-                                                egui::Color32::RED,
-                                                format!("批准失败: {}", e),
-                                            );
-                                        }
                                     }
-                                }
-                                if ui.button("❌ 拒绝").clicked() {
-                                    if let Err(e) = reject_join(group, request, admin_signing_key) {
-                                        ui.colored_label(
-                                            egui::Color32::RED,
-                                            format!("拒绝失败: {}", e),
-                                        );
-                                    } else {
-                                        result = Some(ApproveMemberResult::Rejected {
-                                            requester_id: requester_id.clone(),
-                                        });
-                                    }
-                                }
+                                });
                             });
+                            ui.add_space(8.0);
                         });
-                        ui.add_space(8.0);
                     }
                 });
             }

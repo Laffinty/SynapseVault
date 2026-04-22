@@ -131,8 +131,8 @@ fn test_validator_set_from_members() {
 
     let set = ValidatorSet::from_members(&members);
     assert_eq!(set.len(), 2, "只有活跃 Admin 才是验证者");
-    assert!(set.pubkeys().iter().any(|pk| *pk == admin1.public_key));
-    assert!(set.pubkeys().iter().any(|pk| *pk == admin2.public_key));
+    assert!(set.pubkeys().contains(&admin1.public_key));
+    assert!(set.pubkeys().contains(&admin2.public_key));
 }
 
 #[test]

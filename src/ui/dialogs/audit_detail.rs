@@ -28,7 +28,7 @@ pub fn render_audit_detail_dialog(ctx: &Context, dialog: &mut AuditDetailDialog)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
-            ui.heading("📋 事件详情");
+            ui.heading("事件详情");
             ui.add_space(12.0);
 
             egui::Grid::new("audit_detail_grid")

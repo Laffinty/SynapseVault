@@ -40,7 +40,7 @@ pub fn render_create_group_dialog(
     let mut result = None;
     let mut open = true;
 
-    Window::new("➕ 创建新组")
+    Window::new("创建新组")
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -57,7 +57,7 @@ pub fn render_create_group_dialog(
             ui.add_space(8.0);
 
             if let Some(ref err) = dialog.error {
-                ui.colored_label(egui::Color32::RED, format!("❌ {}", err));
+                ui.colored_label(egui::Color32::RED, format!("[错误] {}", err));
                 ui.add_space(8.0);
             }
 

@@ -32,8 +32,8 @@ pub fn log_event(conn: &Connection, event: &AuditEvent, block_height: Option<i64
     conn.execute(
         "INSERT OR REPLACE INTO audit_index (
             event_id, block_height, operation_type, actor_member_id,
-            target_secret_id, device_fingerprint, peer_id, client_ip, timestamp
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            target_secret_id, device_fingerprint, peer_id, client_ip, timestamp, signature
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             &event.event_id,
             block_height,
@@ -44,6 +44,7 @@ pub fn log_event(conn: &Connection, event: &AuditEvent, block_height: Option<i64
             &event.peer_id,
             event.client_ip.as_deref(),
             event.timestamp.to_rfc3339(),
+            &event.signature,
         ],
     )?;
     Ok(())
@@ -73,7 +74,7 @@ pub fn sync_event(conn: &Connection, event: &AuditEvent, block_height: Option<i6
 pub fn query_events(conn: &Connection, query: &AuditQuery) -> Result<Vec<AuditEvent>, AuditLogError> {
     let mut sql = String::from(
         "SELECT event_id, operation_type, actor_member_id, target_secret_id,
-                device_fingerprint, peer_id, client_ip, timestamp
+                device_fingerprint, peer_id, client_ip, timestamp, signature
          FROM audit_index WHERE 1=1"
     );
     let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -125,6 +126,8 @@ pub fn query_events(conn: &Connection, query: &AuditQuery) -> Result<Vec<AuditEv
             rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e))
         })?;
 
+        let signature: Vec<u8> = row.get(8)?;
+
         let mut event = AuditEvent {
             event_id,
             operation_type,
@@ -136,6 +139,7 @@ pub fn query_events(conn: &Connection, query: &AuditQuery) -> Result<Vec<AuditEv
             timestamp,
             summary: String::new(),
             event_hash: [0u8; 32],
+            signature,
         };
         event.update_hash();
         Ok(event)

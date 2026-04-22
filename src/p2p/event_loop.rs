@@ -58,8 +58,10 @@ pub struct EventLoop {
     pub events: VecDeque<P2pEvent>,
     /// 本地 PeerId
     pub local_peer_id: PeerId,
-    /// 已见过的消息 ID 集合（LRU 缓存，容量 1000）
+    /// 已见过的消息 ID 集合（快速查找）
     pub seen_message_ids: HashSet<[u8; 32]>,
+    /// 消息 ID 队列（按到达顺序，用于 LRU 淘汰）
+    pub seen_message_queue: VecDeque<[u8; 32]>,
 }
 
 impl EventLoop {
@@ -68,6 +70,7 @@ impl EventLoop {
             events: VecDeque::new(),
             local_peer_id,
             seen_message_ids: HashSet::with_capacity(1000),
+            seen_message_queue: VecDeque::with_capacity(1000),
         }
     }
 
@@ -131,9 +134,12 @@ impl EventLoop {
                         }
 
                         if self.seen_message_ids.len() >= 1000 {
-                            self.seen_message_ids.clear();
+                            if let Some(old_id) = self.seen_message_queue.pop_front() {
+                                self.seen_message_ids.remove(&old_id);
+                            }
                         }
                         self.seen_message_ids.insert(msg_id);
+                        self.seen_message_queue.push_back(msg_id);
 
                         self.handle_p2p_message(&peer_str, envelope.payload);
                     }

@@ -10,15 +10,18 @@ use egui_extras::{Column, TableBuilder};
 
 /// 密码库面板渲染
 pub fn render_secret_panel(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) {
-    ui.heading("🔑 密码库");
+    ui.heading("密码库");
     ui.add_space(8.0);
 
     // 搜索和过滤栏
     ui.horizontal(|ui| {
-        ui.label("🔍 搜索:");
+        ui.label("搜索:");
         ui.text_edit_singleline(&mut app.secret_search_query);
         if ui.button("清除").clicked() {
             app.secret_search_query.clear();
+        }
+        if ui.button("添加密码").clicked() {
+            app.active_dialog = Some(crate::app::DialogState::CreateSecret);
         }
     });
 
@@ -170,9 +173,9 @@ fn render_secret_table(
                     ui.painter().rect_filled(rect, 0.0, row_color);
 
                     let title_text = if expired {
-                        format!("⚠️ {}", secret.title)
+                        format!("[过期] {}", secret.title)
                     } else if expiring_soon {
-                        format!("⏳ {}", secret.title)
+                        format!("[即将过期] {}", secret.title)
                     } else {
                         secret.title.clone()
                     };
@@ -226,13 +229,18 @@ fn render_secret_table(
                     let rect = ui.max_rect();
                     ui.painter().rect_filled(rect, 0.0, row_color);
 
-                    ui.horizontal(|ui| {
-                        if ui.button("👁 查看").clicked() {
-                            app.active_dialog = Some(crate::app::DialogState::ViewSecret { secret_id: secret.secret_id.clone() });
-                        }
-                        if ui.button("📋 复制").clicked() {
-                            app.active_dialog = Some(crate::app::DialogState::CopySecret { secret_id: secret.secret_id.clone() });
-                        }
+                    ui.push_id(&secret.secret_id, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("查看").clicked() {
+                                app.active_dialog = Some(crate::app::DialogState::ViewSecret { secret_id: secret.secret_id.clone() });
+                            }
+                            if ui.button("复制").clicked() {
+                                app.active_dialog = Some(crate::app::DialogState::CopySecret { secret_id: secret.secret_id.clone() });
+                            }
+                            if ui.button("编辑").clicked() {
+                                app.active_dialog = Some(crate::app::DialogState::EditSecret { secret_id: secret.secret_id.clone() });
+                            }
+                        });
                     });
                 });
             });

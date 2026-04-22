@@ -12,7 +12,7 @@ pub fn render_top_bar(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) {
             ui.heading("SynapseVault");
             ui.separator();
 
-            ui.label("🔓 已解锁");
+            ui.label("已解锁");
             ui.separator();
 
             let group_name = app
@@ -29,13 +29,13 @@ pub fn render_top_bar(app: &mut SynapseVaultApp, ctx: &Context, ui: &mut Ui) {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let theme_icon = match app.theme {
-                    ThemeMode::Dark => "☀️",
-                    ThemeMode::Light => "🌙",
+                    ThemeMode::Dark => "浅色",
+                    ThemeMode::Light => "深色",
                 };
                 if ui.button(theme_icon).clicked() {
                     app.toggle_theme(ctx);
                 }
-                if ui.button("⚙️").clicked() {
+                if ui.button("设置").clicked() {
                     app.current_panel = crate::app::Panel::Settings;
                 }
             });

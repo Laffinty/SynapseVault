@@ -61,8 +61,8 @@ pub fn render_unlock_window(
     let mut action = None;
 
     let title = match mode {
-        UnlockWindowMode::FirstSetup => "🔐 首次设置 SynapseVault",
-        UnlockWindowMode::Unlock => "🔐 解锁 SynapseVault",
+        UnlockWindowMode::FirstSetup => "首次设置 SynapseVault",
+        UnlockWindowMode::Unlock => "解锁 SynapseVault",
     };
 
     egui::Window::new(title)
@@ -112,7 +112,7 @@ pub fn render_unlock_window(
                                 .hint_text("输入主密码..."),
                         );
                     }
-                    if ui.button(if *show_password { "🙈" } else { "👁" }).clicked() {
+                    if ui.button(if *show_password { "隐藏" } else { "显示" }).clicked() {
                         *show_password = !*show_password;
                     }
                 });

@@ -52,7 +52,6 @@ pub struct Group {
     /// 管理员公钥
     pub admin_public_key: VerifyingKey,
     /// 成员集合（CRDT OR-Set，以 member_id 为元素）
-    #[serde(skip)]
     pub members: Orswot<MemberId, String>,
     /// 成员详细信息（以 member_id 为键）
     pub member_map: HashMap<MemberId, Member>,
@@ -146,6 +145,9 @@ pub fn create_group(
     admin_signing_key: &SigningKey,
     config: GroupConfig,
 ) -> Result<(Group, GroupSigningKey), GroupError> {
+    if name.is_empty() || name.len() > 64 {
+        return Err(GroupError::Serialization("组名长度必须在 1-64 字符之间".to_string()));
+    }
     let admin_public_key = admin_signing_key.verifying_key();
     let group_signing_key = GroupSigningKey::generate();
     let group_id = generate_group_id(&group_signing_key.public_key);
@@ -273,12 +275,22 @@ pub fn approve_join(
 
 /// Admin 拒绝加入请求
 pub fn reject_join(
-    _group: &mut Group,
-    _request: &JoinRequest,
-    _admin_signing_key: &SigningKey,
+    group: &mut Group,
+    request: &JoinRequest,
+    admin_signing_key: &SigningKey,
 ) -> Result<(), GroupError> {
-    // 拒绝操作主要是一个通知，无需持久化状态变更
-    // 实际场景中可记录审计日志
+    // 验证请求者签名
+    verify_join_request(request)?;
+
+    // 检查是否为 Admin
+    let admin_pubkey = admin_signing_key.verifying_key();
+    let admin_id = hex::encode(admin_pubkey.as_bytes());
+    if !group.member_map.contains_key(&admin_id) {
+        return Err(GroupError::NotAdmin);
+    }
+
+    // 拒绝无需修改群组状态，但已验证权限和请求真实性
+    // 调用者应通过 P2P 向请求者发送拒绝通知
     Ok(())
 }
 

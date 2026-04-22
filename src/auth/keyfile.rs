@@ -67,6 +67,9 @@ pub enum KeyFileError {
 pub fn generate_key_file(
     master_password: &str,
 ) -> Result<(KeyFile, SigningKey, [u8; 32]), KeyFileError> {
+    if master_password.is_empty() {
+        return Err(KeyFileError::InvalidFormat);
+    }
     let salt = generate_salt();
     let argon2_params = crate::crypto::kdf::calibrate_argon2_params(1000);
 
@@ -112,7 +115,7 @@ pub fn reset_password(
     new_password: &str,
 ) -> Result<KeyFile, KeyFileError> {
     let salt = generate_salt();
-    let argon2_params = Argon2Params::default();
+    let argon2_params = crate::crypto::kdf::calibrate_argon2_params(1000);
 
     let master_key = crate::crypto::kdf::derive_master_key(new_password, &salt, &argon2_params)
         .map_err(|_| KeyFileError::EncryptFailed)?;
@@ -345,9 +348,8 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_password_allowed_by_argon2() {
-        // Argon2 允许空密码，但生成密钥文件本身不会失败
+    fn test_empty_password_rejected() {
         let result = generate_key_file("");
-        assert!(result.is_ok());
+        assert!(matches!(result, Err(KeyFileError::InvalidFormat)));
     }
 }

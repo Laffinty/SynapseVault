@@ -34,10 +34,10 @@ pub fn render_side_panel(app: &mut SynapseVaultApp, ui: &mut Ui) {
 
             if !app.side_panel_collapsed {
                 let buttons = [
-                    ("📁 组管理", Panel::GroupManagement),
-                    ("🔑 密码库", Panel::SecretVault),
-                    ("🛡️ 权限", Panel::RbacManagement),
-                    ("📋 审计", Panel::AuditLog),
+                    ("组管理", Panel::GroupManagement),
+                    ("密码库", Panel::SecretVault),
+                    ("权限", Panel::RbacManagement),
+                    ("审计", Panel::AuditLog),
                 ];
 
                 for (label, panel) in &buttons {
@@ -60,7 +60,7 @@ pub fn render_side_panel(app: &mut SynapseVaultApp, ui: &mut Ui) {
             }
 
             ui.vertical_centered(|ui| {
-                if ui.button("🔒 锁定").clicked() {
+                if ui.button("锁定").clicked() {
                     app.lock_app();
                 }
             });

@@ -52,6 +52,16 @@ impl<'a> SecretStore<'a> {
         created_by: &MemberId,
         master_key: &[u8; 32],
     ) -> Result<SecretEntry, SecretEntryError> {
+        // 输入长度校验
+        if title.len() > 4096 || username.len() > 4096 || environment.len() > 4096 || description.len() > 65536 {
+            return Err(SecretEntryError::InvalidData("字段长度超出限制".to_string()));
+        }
+        if password.len() > 65536 {
+            return Err(SecretEntryError::InvalidData("密码长度超出限制".to_string()));
+        }
+        if tags.len() > 100 {
+            return Err(SecretEntryError::InvalidData("标签数量超出限制".to_string()));
+        }
         let secret_id = Uuid::new_v4().to_string();
         let now = Utc::now();
 
@@ -147,7 +157,10 @@ impl<'a> SecretStore<'a> {
                     ),
                 })
             },
-        ).map_err(|_| SecretEntryError::NotFound(secret_id.clone()))
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => SecretEntryError::NotFound(secret_id.clone()),
+            _ => SecretEntryError::Database(e.to_string()),
+        })
     }
 
     /// 获取密码条目元信息列表
@@ -267,12 +280,8 @@ impl<'a> SecretStore<'a> {
             self.conn
                 .prepare(sql)?
                 .query_map(params![gid, limit as i64, offset as i64], |row| {
-                    let tags_str: String = row.get(4)?;
-                    let tags: Vec<String> = if tags_str.is_empty() {
-                        Vec::new()
-                    } else {
-                        tags_str.split(',').map(|s| s.trim().to_string()).collect()
-                    };
+                    let tags_json: String = row.get(4)?;
+                    let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                     Ok(SecretMeta {
                         secret_id: row.get(0)?,
                         title: row.get(1)?,
@@ -295,12 +304,8 @@ impl<'a> SecretStore<'a> {
             self.conn
                 .prepare(sql)?
                 .query_map(params![limit as i64, offset as i64], |row| {
-                    let tags_str: String = row.get(4)?;
-                    let tags: Vec<String> = if tags_str.is_empty() {
-                        Vec::new()
-                    } else {
-                        tags_str.split(',').map(|s| s.trim().to_string()).collect()
-                    };
+                    let tags_json: String = row.get(4)?;
+                    let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
                     Ok(SecretMeta {
                         secret_id: row.get(0)?,
                         title: row.get(1)?,
@@ -338,6 +343,26 @@ impl<'a> SecretStore<'a> {
         new_expires_at: Option<Option<DateTime<Utc>>>,
         master_key: &[u8; 32],
     ) -> Result<SecretEntry, SecretEntryError> {
+        // 输入长度校验
+        if let Some(t) = new_title {
+            if t.len() > 4096 { return Err(SecretEntryError::InvalidData("标题长度超出限制".to_string())); }
+        }
+        if let Some(u) = new_username {
+            if u.len() > 4096 { return Err(SecretEntryError::InvalidData("用户名长度超出限制".to_string())); }
+        }
+        if let Some(e) = new_environment {
+            if e.len() > 4096 { return Err(SecretEntryError::InvalidData("环境长度超出限制".to_string())); }
+        }
+        if let Some(d) = new_description {
+            if d.len() > 65536 { return Err(SecretEntryError::InvalidData("描述长度超出限制".to_string())); }
+        }
+        if let Some(p) = new_password {
+            if p.len() > 65536 { return Err(SecretEntryError::InvalidData("密码长度超出限制".to_string())); }
+        }
+        if let Some(ref t) = new_tags {
+            if t.len() > 100 { return Err(SecretEntryError::InvalidData("标签数量超出限制".to_string())); }
+        }
+
         let mut entry = self.get_secret(secret_id)?;
         let now = Utc::now();
 

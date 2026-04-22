@@ -83,43 +83,24 @@ pub fn merge_secret_entries(
     local_deleted: bool,
     remote_deleted: bool,
 ) -> Option<SecretEntry> {
-    // 删除优先
+    // 删除优先：只要任一方明确删除，结果即为删除（ tombstone 优先策略 ）
     if local_deleted || remote_deleted {
-        // 删除优先，但如果保留方的版本号明显更高则保留
-        match (local, remote, local_deleted, remote_deleted) {
-            (Some(l), Some(r), false, true) => {
-                // 本地有更新，远程已删除：若本地版本更高则保留本地，否则删除
-                if l.version > r.version {
-                    Some(l.clone())
-                } else {
-                    None
-                }
+        return None;
+    }
+
+    // 双方都未删除，使用 LWW
+    match (local, remote) {
+        (Some(l), Some(r)) => {
+            let result = ConflictResolver::resolve_secret_conflict(l, r);
+            if result == MergeResult::RemoteWins {
+                Some(r.clone())
+            } else {
+                Some(l.clone())
             }
-            (Some(l), Some(r), true, false) => {
-                // 本地已删除，远程有更新：若远程版本更高则保留远程，否则删除
-                if r.version > l.version {
-                    Some(r.clone())
-                } else {
-                    None
-                }
-            }
-            _ => None,
         }
-    } else {
-        // 双方都未删除，使用 LWW
-        match (local, remote) {
-            (Some(l), Some(r)) => {
-                let result = ConflictResolver::resolve_secret_conflict(l, r);
-                if result == MergeResult::RemoteWins {
-                    Some(r.clone())
-                } else {
-                    Some(l.clone())
-                }
-            }
-            (Some(l), None) => Some(l.clone()),
-            (None, Some(r)) => Some(r.clone()),
-            (None, None) => None,
-        }
+        (Some(l), None) => Some(l.clone()),
+        (None, Some(r)) => Some(r.clone()),
+        (None, None) => None,
     }
 }
 
@@ -187,17 +168,17 @@ mod tests {
         let local = make_entry("s1", 3, now, "a");
         let remote = make_entry("s1", 3, now, "b");
 
-        // 远程删除，本地版本不高
+        // 远程删除，无论本地版本多高，结果都是删除
         assert_eq!(
             merge_secret_entries(Some(&local), Some(&remote), false, true),
             None
         );
 
-        // 本地删除，远程版本更高
+        // 本地删除，无论远程版本多高，结果都是删除
         let remote_newer = make_entry("s1", 5, now + chrono::Duration::seconds(10), "b");
         assert_eq!(
             merge_secret_entries(Some(&local), Some(&remote_newer), true, false),
-            Some(remote_newer)
+            None
         );
     }
 
